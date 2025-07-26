@@ -1,0 +1,8 @@
+{
+  "domain": "sdm630_simulator",
+  "name": "SDM630 Simulator",
+  "version": "0.1.0",
+  "documentation": "https://github.com/ghost77-cloud/sdm630-simulator",
+  "requirements": [],
+  "codeowners": ["@ghost77-cloud"]
+}
