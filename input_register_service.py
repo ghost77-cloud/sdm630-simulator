@@ -1,7 +1,12 @@
 """
 Service to update SDM630 input registers by constant.
 """
-from sdm630_input_registers import SDM630InputRegisters, PHASE_1_VOLTAGE, PHASE_2_VOLTAGE, PHASE_3_VOLTAGE, PHASE_1_CURRENT, PHASE_2_CURRENT, PHASE_3_CURRENT
+if __package__ is None or __package__ == '':
+    # Running standalone, use absolute imports
+    from sdm630_input_registers import SDM630InputRegisters, PHASE_1_VOLTAGE, PHASE_2_VOLTAGE, PHASE_3_VOLTAGE, PHASE_1_CURRENT, PHASE_2_CURRENT, PHASE_3_CURRENT
+else:
+    # Running as a package (Home Assistant component), use relative imports
+    from .sdm630_input_registers import SDM630InputRegisters, PHASE_1_VOLTAGE, PHASE_2_VOLTAGE, PHASE_3_VOLTAGE, PHASE_1_CURRENT, PHASE_2_CURRENT, PHASE_3_CURRENT
 
 class InputRegisterService:
     def __init__(self, input_registers: SDM630InputRegisters):

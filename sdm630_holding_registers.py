@@ -2,7 +2,12 @@
 SDM630 Holding Register Definitions
 All holding registers for SDM630, with metadata from specification.
 """
-from registers import SDM630Register
+if __package__ is None or __package__ == '':
+    # Running standalone, use absolute imports
+    from registers import SDM630Register
+else:
+    # Running as a package (Home Assistant component), use relative imports
+    from .registers import SDM630Register
 
 class SDM630HoldingRegisters:
     def __init__(self):

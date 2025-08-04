@@ -7,8 +7,18 @@ from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock
 from pymodbus.datastore import ModbusSlaveContext
 from pymodbus.device import ModbusDeviceIdentification
 import struct
-from sdm630_input_registers import SDM630InputRegisters
-from sdm630_holding_registers import SDM630HoldingRegisters
+import importlib.util
+import sys
+
+# Determine if we're running as a package (Home Assistant component) or standalone
+if __package__ is None or __package__ == '':
+    # Running standalone, use absolute imports
+    from sdm630_input_registers import SDM630InputRegisters
+    from sdm630_holding_registers import SDM630HoldingRegisters
+else:
+    # Running as a package (Home Assistant component), use relative imports
+    from .sdm630_input_registers import SDM630InputRegisters
+    from .sdm630_holding_registers import SDM630HoldingRegisters
 
 SDM630_HOLDING_REGISTERS = {
     # 4X registers: 40003 (2) to 40087 (86), plus special config registers

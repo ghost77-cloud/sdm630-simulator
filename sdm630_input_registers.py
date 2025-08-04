@@ -3,7 +3,12 @@ SDM630 Input Register Definitions
 All input registers for SDM630 from 30001 to 30381, with metadata from specification.
 """
 
-from registers import SDM630Register
+if __package__ is None or __package__ == '':
+    # Running standalone, use absolute imports
+    from registers import SDM630Register
+else:
+    # Running as a package (Home Assistant component), use relative imports
+    from .registers import SDM630Register
 
 # Constants for input register addresses (parameter numbers 1-54)
 PHASE_1_VOLTAGE = 1
