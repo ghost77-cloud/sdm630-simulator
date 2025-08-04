@@ -3,6 +3,6 @@
   "name": "SDM630 Simulator",
   "version": "0.1.0",
   "documentation": "https://github.com/ghost77-cloud/sdm630-simulator",
-  "requirements": ["pymodbus>=3.10.0"],
+  "requirements": ["pymodbus>=3.8.3"],
   "codeowners": ["@ghost77-cloud"]
 }
