@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import CONF_NAME, ENERGY_WATT_HOUR, POWER_WATT
+from homeassistant.const import CONF_NAME
 from homeassistant.helpers.discovery import async_load_platform
 from pymodbus.server import StartAsyncTcpServer
 from modbus_server import (
@@ -42,7 +42,7 @@ class SDM630SimSensor(SensorEntity):
         """Initialize the sensor."""
         self._attr_name = name
         self._attr_native_value = None
-        self._attr_native_unit_of_measurement = POWER_WATT
+        self._attr_native_unit_of_measurement = "Watt"
         self._attr_unique_id = "sdm630_simulator_power"
         self._attr_should_poll = True  # Enable polling
         
