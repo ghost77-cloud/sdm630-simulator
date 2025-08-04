@@ -4,12 +4,12 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers.discovery import async_load_platform
 from pymodbus.server import StartAsyncTcpServer
-from modbus_server import (
+from .modbus_server import (
     context,
     identity,
     input_reg_manager,
 )
-from sdm630_input_registers import TOTAL_POWER
+from .sdm630_input_registers import TOTAL_POWER
 
 _LOGGER = logging.getLogger(__name__)
 

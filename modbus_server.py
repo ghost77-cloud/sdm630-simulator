@@ -3,8 +3,9 @@ SDM630 Modbus Protocol Simulator using pymodbus
 Implements all input and holding registers as per SDM630 documentation.
 """
 from pymodbus.server import StartTcpServer
-from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock, ModbusDeviceContext
-from pymodbus.pdu.device import ModbusDeviceIdentification
+from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock
+from pymodbus.datastore import ModbusSlaveContext
+from pymodbus.device import ModbusDeviceIdentification
 import struct
 from sdm630_input_registers import SDM630InputRegisters
 from sdm630_holding_registers import SDM630HoldingRegisters
@@ -66,14 +67,14 @@ holding_registers_obj = SDM630HoldingRegisters()
 holding_reg_manager = SDM630RegisterManager(holding_registers_obj.as_dict())
 
 # Create Modbus server context for input and holding registers
-context = ModbusServerContext(
-    devices = ModbusDeviceContext(
-        di = ModbusSparseDataBlock({}),
-        co = ModbusSparseDataBlock({}),
-        hr = SDM630DataBlock(holding_reg_manager),
-        ir = SDM630DataBlock(input_reg_manager)), 
-    single = True
+slave_context = ModbusSlaveContext(
+    di = ModbusSparseDataBlock({}),
+    co = ModbusSparseDataBlock({}),
+    hr = SDM630DataBlock(holding_reg_manager),
+    ir = SDM630DataBlock(input_reg_manager)
 )
+
+context = ModbusServerContext(slaves=slave_context, single=True)
 
 # Device identification
 identity = ModbusDeviceIdentification()
