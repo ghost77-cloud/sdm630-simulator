@@ -55,9 +55,10 @@ class SDM630SimSensor(SensorEntity):
         
     async def async_update(self):
         """Fetch new state data for the sensor."""
+        _LOGGER.warning("Updated sensor value")
         try:
             # Get the power value from register 12 (Total System Power)
-            self._attr_native_value = input_reg_manager.get_float(TOTAL_POWER)
+            self._attr_native_value = input_reg_manager.set_float(TOTAL_POWER, input_reg_manager.get_float(TOTAL_POWER) + 1.0)
             
             # Get server statistics
             stats = context.server.counter._data if hasattr(context, 'server') else None
