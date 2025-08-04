@@ -1,5 +1,6 @@
 import logging
 import asyncio
+from datetime import timedelta
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers.discovery import async_load_platform
@@ -14,7 +15,7 @@ from .sdm630_input_registers import TOTAL_POWER
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_NAME = "SDM630 Simulated Meter"
-SCAN_INTERVAL = 10  # Update every 10 seconds
+SCAN_INTERVAL = timedelta(seconds=10)  # Update every 10 seconds
 
 async def start_modbus_server():
     """Start the Modbus server asynchronously."""
