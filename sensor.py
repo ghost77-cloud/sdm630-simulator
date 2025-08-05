@@ -4,6 +4,10 @@ from datetime import timedelta
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers.discovery import async_load_platform
+from homeassistant.core import callback
+from homeassistant.helpers.event import (
+    async_track_state_change_event
+)
 from pymodbus.server import StartAsyncTcpServer
 from .modbus_server import (
     context,
@@ -36,33 +40,48 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Start the Modbus server in the background
     hass.loop.create_task(start_modbus_server())
     
-    async_add_entities([SDM630SimSensor(name)])
+    sensor = SDM630SimSensor(name, hass)
+    async_add_entities([sensor])
 
 class SDM630SimSensor(SensorEntity):
-    def __init__(self, name):
+    def __init__(self, name, hass):
         """Initialize the sensor."""
         self._attr_name = name
         self._attr_native_value = None
         self._attr_native_unit_of_measurement = "Watt"
         self._attr_unique_id = "sdm630_simulator_power"
-        self._attr_should_poll = True  # Enable polling
+        self._attr_should_poll = False  # Disable polling since we'll use state tracking
+        self.hass = hass
         
-    async def async_update(self):
-        """Fetch new state data for the sensor."""
-        try:
-            # Get the current power value and increment it
-            current_power = input_data_block.get_float(TOTAL_POWER)
-            new_power = current_power + 1.0
-            
-            # Update both the register manager and Modbus store
-            input_data_block.set_float(TOTAL_POWER, new_power)
-            self._attr_native_value = new_power
-                        
-            _LOGGER.debug("Updated sensor value to: %s", self._attr_native_value)
-        except Exception as e:
-            _LOGGER.exception("Error updating sensor value: ", e)
-            self._attr_native_value = None
+    async def async_added_to_hass(self):
+        """Run when entity about to be added to hass."""
+        await super().async_added_to_hass()
+        
+        # Start listening to state changes
+        @callback
+        def _handle_state_change(event):
+            """Handle state changes of the tracked entity."""
+            new_state = event.data.get("new_state")
+            if new_state is not None:
+                try:
+                    new_value = float(new_state.state)
+                    # Update both the register manager and Modbus store
+                    input_data_block.set_float(TOTAL_POWER, new_value)
+                    self._attr_native_value = new_value
+                    self.async_write_ha_state()
+                    _LOGGER.debug("Updated sensor value to: %s from external sensor", new_value)
+                except (ValueError, TypeError) as e:
+                    _LOGGER.error("Error processing new state value: %s", e)
 
+        # Subscribe to state changes using async_track_state_change_event
+        self.async_on_remove(
+            async_track_state_change_event(
+                self.hass,
+                ["sensor.sph10000_ac_to_grid_total", "sensor.sph10000_output_power"],
+                _handle_state_change
+            )
+        )
+        
     @property
     def name(self):
         """Return the name of the sensor."""
