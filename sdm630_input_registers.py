@@ -2,13 +2,14 @@
 SDM630 Input Register Definitions
 All input registers for SDM630 from 30001 to 30381, with metadata from specification.
 """
+from dataclasses import dataclass
 
 if __package__ is None or __package__ == '':
     # Running standalone, use absolute imports
-    from registers import SDM630Register
+    from registers import SDM630Register, SDM630Registers
 else:
     # Running as a package (Home Assistant component), use relative imports
-    from .registers import SDM630Register
+    from .registers import SDM630Register, SDM630Registers
 
 # Constants for input register addresses (parameter numbers 1-54)
 PHASE_1_VOLTAGE = 1
@@ -54,7 +55,10 @@ MAX_TOTAL_VA_DEMAND = 103
 NEUTRAL_CURRENT_DEMAND = 105
 MAX_NEUTRAL_CURRENT_DEMAND = 107
 
-class SDM630InputRegisters:
+@dataclass
+class SDM630InputRegisters(SDM630Registers):
+    registers: list[SDM630Register]
+
     def __init__(self):
         self.registers = []
         self._init_registers()
@@ -104,18 +108,13 @@ class SDM630InputRegisters:
         self.registers.append(SDM630Register(MAX_TOTAL_VA_DEMAND, 53, "Maximum total system VA demand", "VA", 360.0))
         self.registers.append(SDM630Register(NEUTRAL_CURRENT_DEMAND, 53, "Neutral current demand", "Amps", 1.0))
         self.registers.append(SDM630Register(MAX_NEUTRAL_CURRENT_DEMAND, 54, "Maximum neutral current demand", "Amps", 1.2))
+        super().__init__(self.registers)
         
     def get_by_address(self, address):
         for reg in self.registers:
             if reg.address == address:
                 return reg
         return None
-
-    def get_all(self):
-        return self.registers
-
-    def as_dict(self):
-        return {reg.address: reg.get_value() for reg in self.registers}
 
     def update_by_constant(self, constant, value):
         reg = self.get_by_address(constant)

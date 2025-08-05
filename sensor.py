@@ -8,7 +8,7 @@ from pymodbus.server import StartAsyncTcpServer
 from .modbus_server import (
     context,
     identity,
-    input_reg_manager,
+    input_data_block,
 )
 from .sdm630_input_registers import TOTAL_POWER
 
@@ -51,16 +51,16 @@ class SDM630SimSensor(SensorEntity):
         """Fetch new state data for the sensor."""
         try:
             # Get the current power value and increment it
-            current_power = input_reg_manager.get_float(TOTAL_POWER)
+            current_power = input_data_block.get_float(TOTAL_POWER)
             new_power = current_power + 1.0
             
             # Update both the register manager and Modbus store
-            input_reg_manager.set_float(TOTAL_POWER, new_power)
+            input_data_block.set_float(TOTAL_POWER, new_power)
             self._attr_native_value = new_power
                         
             _LOGGER.debug("Updated sensor value to: %s", self._attr_native_value)
         except Exception as e:
-            _LOGGER.error("Error updating sensor value: %s", str(e))
+            _LOGGER.exception("Error updating sensor value: ", e)
             self._attr_native_value = None
 
     @property
