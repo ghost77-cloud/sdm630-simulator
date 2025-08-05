@@ -40,8 +40,20 @@ class SDM630RegisterManager:
     def set_float(self, addr, value):
         """Set a float value at Modbus register address (even only)"""
         self.reg_map[addr] = value
+        # Convert float to registers and update the Modbus data store
+        if context and hasattr(context, 'slaves'):
+            regs = float_to_regs(value)
+            # Input registers start at 30001, so we need to adjust the address
+            context.slaves[0].store.setValues(3, addr - 1, regs)  # 3 is for input registers
 
     def get_float(self, addr):
+        """Get a float value from Modbus register address"""
+        if context and hasattr(context, 'slaves'):
+            # Get the raw registers from the Modbus store
+            regs = context.slaves[0].store.getValues(3, addr - 1, 2)
+            # Convert the registers back to float
+            b = struct.pack('>HH', regs[0], regs[1])
+            return struct.unpack('>f', b)[0]
         return self.reg_map.get(addr, 0.0)
 
     def get_all(self):

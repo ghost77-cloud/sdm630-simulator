@@ -46,34 +46,18 @@ class SDM630SimSensor(SensorEntity):
         self._attr_native_unit_of_measurement = "Watt"
         self._attr_unique_id = "sdm630_simulator_power"
         self._attr_should_poll = True  # Enable polling
-        self._attr_extra_state_attributes = {
-            'total_requests': 0,
-            'read_requests': 0,
-            'write_requests': 0,
-            'errors': 0
-        }
         
     async def async_update(self):
         """Fetch new state data for the sensor."""
         try:
-            # Get the power value from register 12 (Total System Power)
-            input_reg_manager.set_float(TOTAL_POWER, input_reg_manager.get_float(TOTAL_POWER) + 1.0)
-            self._attr_native_value = input_reg_manager.get_float(TOTAL_POWER)
+            # Get the current power value and increment it
+            current_power = input_reg_manager.get_float(TOTAL_POWER)
+            new_power = current_power + 1.0
             
-            # Get server statistics
-            if hasattr(context, 'slaves'):
-                slave = context.slaves[0]
-                _LOGGER.warning(f"Slave: {slave}")
-                if slave is not None and hasattr(slave, 'store'):
-                    _LOGGER.warning("store available")
-                    stats = slave.store.counter
-                    self._attr_extra_state_attributes = {
-                        'total_requests': stats.total_messages,
-                        'read_requests': stats.read_messages,
-                        'write_requests': stats.write_messages,
-                        'errors': stats.errors
-                    }
-            
+            # Update both the register manager and Modbus store
+            input_reg_manager.set_float(TOTAL_POWER, new_power)
+            self._attr_native_value = new_power
+                        
             _LOGGER.debug("Updated sensor value to: %s", self._attr_native_value)
         except Exception as e:
             _LOGGER.error("Error updating sensor value: %s", str(e))
