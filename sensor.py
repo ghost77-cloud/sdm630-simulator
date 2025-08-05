@@ -55,21 +55,24 @@ class SDM630SimSensor(SensorEntity):
         
     async def async_update(self):
         """Fetch new state data for the sensor."""
-        _LOGGER.warning("Updated sensor value")
         try:
             # Get the power value from register 12 (Total System Power)
             input_reg_manager.set_float(TOTAL_POWER, input_reg_manager.get_float(TOTAL_POWER) + 1.0)
             self._attr_native_value = input_reg_manager.get_float(TOTAL_POWER)
             
             # Get server statistics
-            stats = context.server.counter._data if hasattr(context, 'server') else None
-            if stats:
-                self._attr_extra_state_attributes = {
-                    'total_requests': stats.get('Transaction', 0),
-                    'read_requests': stats.get('Read', 0),
-                    'write_requests': stats.get('Write', 0),
-                    'errors': stats.get('Error', 0)
-                }
+            if hasattr(context, 'slaves'):
+                _LOGGER.warning("slaves available")
+                slave = context.slaves[0]
+                if hasattr(slave, 'store'):
+                    _LOGGER.warning("store available")
+                    stats = slave.store.counter
+                    self._attr_extra_state_attributes = {
+                        'total_requests': stats.total_messages,
+                        'read_requests': stats.read_messages,
+                        'write_requests': stats.write_messages,
+                        'errors': stats.errors
+                    }
             
             _LOGGER.debug("Updated sensor value to: %s", self._attr_native_value)
         except Exception as e:
