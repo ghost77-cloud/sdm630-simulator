@@ -62,9 +62,9 @@ class SDM630SimSensor(SensorEntity):
             
             # Get server statistics
             if hasattr(context, 'slaves'):
-                _LOGGER.warning("slaves available")
                 slave = context.slaves[0]
-                if hasattr(slave, 'store'):
+                _LOGGER.warning(f"Slave: {slave}")
+                if slave is not None and hasattr(slave, 'store'):
                     _LOGGER.warning("store available")
                     stats = slave.store.counter
                     self._attr_extra_state_attributes = {
