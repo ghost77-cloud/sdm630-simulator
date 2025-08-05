@@ -69,11 +69,6 @@ class SDM630SimSensor(SensorEntity):
         return self._attr_name
 
     @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        return self._attr_extra_state_attributes
-
-    @property
     def native_value(self):
         """Return the state of the sensor."""
         return self._attr_native_value
@@ -87,11 +82,3 @@ class SDM630SimSensor(SensorEntity):
     def unique_id(self):
         """Return a unique ID to use for this entity."""
         return self._attr_unique_id
-        
-    def set_power(self, value):
-        """Set the power value in the Modbus register."""
-        try:
-            input_reg_manager.set_float(12, float(value))
-            _LOGGER.info("Set power value to: %s", value)
-        except Exception as e:
-            _LOGGER.error("Error setting power value: %s", str(e))
