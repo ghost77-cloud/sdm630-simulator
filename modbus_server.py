@@ -3,12 +3,9 @@ SDM630 Modbus Protocol Simulator using pymodbus
 Implements all input and holding registers as per SDM630 documentation.
 """
 from pymodbus.server import StartTcpServer
-from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock
-from pymodbus.datastore import ModbusSlaveContext
+from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock, ModbusSlaveContext
 from pymodbus.device import ModbusDeviceIdentification
 import struct
-import importlib.util
-import sys
 
 # Determine if we're running as a package (Home Assistant component) or standalone
 if __package__ is None or __package__ == '':
@@ -21,13 +18,6 @@ else:
     from .registers import SDM630Registers
     from .sdm630_input_registers import SDM630InputRegisters
     from .sdm630_holding_registers import SDM630HoldingRegisters
-
-SDM630_HOLDING_REGISTERS = {
-    # 4X registers: 40003 (2) to 40087 (86), plus special config registers
-    # Only even addresses are valid for floating point values
-}
-for addr in [2, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86]:
-    SDM630_HOLDING_REGISTERS[addr] = 0.0
 
 def float_to_regs(value):
     """Convert float to two 16-bit Modbus registers (IEEE 754)"""
@@ -56,10 +46,8 @@ class SDM630DataBlock(ModbusSparseDataBlock):
         return self.registers.get_float(address)
 
 # Use imported SDM630InputRegisters and SDM630HoldingRegisters for register management
-input_registers = SDM630InputRegisters()
-input_data_block = SDM630DataBlock(input_registers)
-holding_registers = SDM630HoldingRegisters()
-holding_data_block = SDM630DataBlock(holding_registers)
+holding_data_block = SDM630DataBlock(SDM630HoldingRegisters())
+input_data_block = SDM630DataBlock(SDM630InputRegisters())
 
 # Create Modbus server context for input and holding registers
 slave_context = ModbusSlaveContext(

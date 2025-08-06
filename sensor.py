@@ -3,7 +3,6 @@ import asyncio
 from datetime import timedelta
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import CONF_NAME
-from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.core import callback
 from homeassistant.helpers.event import (
     async_track_state_change_event

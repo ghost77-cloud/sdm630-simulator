@@ -11,14 +11,16 @@ class SDM630Register:
     units: str
     value: float = 0.0
     example_value: float = 0.0
+    negative_to_grid: bool = False  # True if negative values indicate power to grid
 
-    def __init__(self, address, parameter_number, description, units, example_value=0.0):
+    def __init__(self, address, parameter_number, description, units, example_value=0.0, negative_to_grid=False):
         self.address = address
         self.parameter_number = parameter_number
         self.description = description
         self.units = units
         self.value = example_value
         self.example_value = example_value
+        self.negative_to_grid = negative_to_grid
 
     def set_value(self, value):
         self.value = value
