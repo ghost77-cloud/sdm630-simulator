@@ -2,7 +2,7 @@
 SDM630 Modbus Protocol Simulator using pymodbus
 Implements all input and holding registers as per SDM630 documentation.
 """
-from pymodbus.server import StartTcpServer
+from pymodbus.server import StartSerialServer
 from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock, ModbusSlaveContext
 from pymodbus.device import ModbusDeviceIdentification
 import struct
@@ -101,4 +101,19 @@ identity.MajorMinorRevision = '1.0'
 
 if __name__ == "__main__":
     _LOGGER.warning(f"Starting SDM630 Modbus TCP Simulator...")
-    StartTcpServer(context, identity=identity, framer="rtu", address=("0.0.0.0", 5020))
+    #StartTcpServer(context, identity=identity, framer="rtu", address=("0.0.0.0", 5020))
+    StartSerialServer(
+        context=context,  # Data storage
+        identity=identity,  # server identify
+        # timeout=1,  # waiting time for request to complete
+        port="/dev/ttyACM2",  # serial port
+        # custom_functions=[],  # allow custom handling
+        framer="RTU",  # The framer strategy to use
+        stopbits=1,  # The number of stop bits to use
+        bytesize=8,  # The bytesize of the serial messages
+        parity="E",  # Which kind of parity to use
+        baudrate="9600",  # The baud rate to use for the serial device
+        handle_local_echo=True,  # Handle local echo of the USB-to-RS485 adaptor
+        # ignore_missing_devices=True,  # ignore request to a missing device
+        # broadcast_enable=False,  # treat device_id 0 as broadcast address,
+    )
