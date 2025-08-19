@@ -100,13 +100,13 @@ identity.ModelName = 'SDM630'
 identity.MajorMinorRevision = '1.0'
 
 if __name__ == "__main__":
-    _LOGGER.warning(f"Starting SDM630 Modbus TCP Simulator...")
+    _LOGGER.info(f"Starting SDM630 Modbus TCP Simulator...")
     #StartTcpServer(context, identity=identity, framer="rtu", address=("0.0.0.0", 5020))
     StartSerialServer(
         context=context,  # Data storage
         identity=identity,  # server identify
         # timeout=1,  # waiting time for request to complete
-        port="/dev/ttyACM2",  # serial port
+        port="/dev/ttyACM1",  # serial port
         # custom_functions=[],  # allow custom handling
         framer="RTU",  # The framer strategy to use
         stopbits=1,  # The number of stop bits to use
