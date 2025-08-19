@@ -7,7 +7,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.event import (
     async_track_state_change_event
 )
-from pymodbus.server import StartAsyncTcpServer
+from pymodbus.server import StartAsyncSerialServer
 from .modbus_server import (
     context,
     identity,
@@ -23,12 +23,24 @@ SCAN_INTERVAL = timedelta(seconds=10)  # Update every 10 seconds
 async def start_modbus_server():
     """Start the Modbus server asynchronously."""
     try:
-        await StartAsyncTcpServer(
-            context,
-            identity=identity,
-            address=("0.0.0.0", 5020),
-            framer="rtu"
+
+        _LOGGER.info(f"Starting SDM630 Modbus Serial Simulator...")
+        await StartAsyncSerialServer(
+            context=context,  # Data storage
+            identity=identity,  # server identify
+            # timeout=1,  # waiting time for request to complete
+            port="/dev/ttyACM1",  # serial port
+            # custom_functions=[],  # allow custom handling
+            framer="RTU",  # The framer strategy to use
+            stopbits=1,  # The number of stop bits to use
+            bytesize=8,  # The bytesize of the serial messages
+            parity="E",  # Which kind of parity to use
+            baudrate="9600",  # The baud rate to use for the serial device
+            handle_local_echo=True,  # Handle local echo of the USB-to-RS485 adaptor
+            # ignore_missing_devices=True,  # ignore request to a missing device
+            # broadcast_enable=False,  # treat device_id 0 as broadcast address,
         )
+
     except Exception as e:
         _LOGGER.error("Failed to start Modbus server: %s", str(e))
 
