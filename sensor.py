@@ -8,6 +8,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event
 )
 from pymodbus.server import StartAsyncSerialServer
+from pymodbus.framer import FramerType
 from .modbus_server import (
     context,
     identity,
@@ -31,7 +32,7 @@ async def start_modbus_server():
             # timeout=1,  # waiting time for request to complete
             port="/dev/ttyACM1",  # serial port
             # custom_functions=[],  # allow custom handling
-            framer="RTU",  # The framer strategy to use
+            framer=FramerType.RTU,  # The framer strategy to use
             stopbits=1,  # The number of stop bits to use
             bytesize=8,  # The bytesize of the serial messages
             parity="E",  # Which kind of parity to use
