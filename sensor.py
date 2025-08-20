@@ -30,7 +30,7 @@ async def start_modbus_server():
             context=context,  # Data storage
             identity=identity,  # server identify
             # timeout=1,  # waiting time for request to complete
-            port="/dev/ttyACM1",  # serial port
+            port="/dev/ttyACM2",  # serial port
             # custom_functions=[],  # allow custom handling
             framer=FramerType.RTU,  # The framer strategy to use
             stopbits=1,  # The number of stop bits to use
