@@ -100,7 +100,7 @@ identity.ModelName = 'SDM630'
 identity.MajorMinorRevision = '1.0'
 
 if __name__ == "__main__":
-    _LOGGER.info(f"Starting SDM630 Modbus TCP Simulator...")
+    _LOGGER.info("Starting SDM630 Modbus TCP Simulator...")
     #StartTcpServer(context, identity=identity, framer="rtu", address=("0.0.0.0", 5020))
     StartTcpServer(
         context,

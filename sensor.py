@@ -25,7 +25,7 @@ async def start_modbus_server():
     """Start the Modbus server asynchronously."""
     try:
 
-        _LOGGER.info(f"Starting SDM630 Modbus Serial Simulator...")
+        _LOGGER.info("Starting SDM630 Modbus Serial Simulator...")
         await StartAsyncSerialServer(
             context=context,  # Data storage
             identity=identity,  # server identify
