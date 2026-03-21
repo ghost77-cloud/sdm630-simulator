@@ -264,8 +264,58 @@ class ForecastConsumer:
         self.config = config
 
     async def get_forecast(self, hass) -> ForecastData:
-        """Fetch forecast from HA weather entity. (Story 3.1)"""
-        raise NotImplementedError
+        """Fetch forecast from HA weather/solar entities. (Story 3.1)"""
+        entities = self.config.get("entities", {})
+        weather_entity = entities.get("weather")
+        solar_entity = entities.get("forecast_solar")
+
+        # AC4: neither weather nor solar configured → silent no-op
+        if not weather_entity and not solar_entity:
+            return ForecastData()
+
+        cloud_coverage_avg: float = 50.0
+        forecast_available: bool = False
+        solar_forecast_kwh_remaining: float | None = None
+
+        try:
+            # Fetch weather forecast if configured
+            if weather_entity:
+                response = await hass.services.async_call(
+                    "weather",
+                    "get_forecasts",
+                    {"entity_id": weather_entity, "type": "hourly"},
+                    blocking=True,
+                    return_response=True,
+                )
+                raw_forecast = response[weather_entity]["forecast"][:6]
+                cloud_values = [
+                    e["cloud_coverage"] for e in raw_forecast if "cloud_coverage" in e
+                ]
+                cloud_coverage_avg = (
+                    sum(cloud_values) / len(cloud_values) if cloud_values else 50.0
+                )
+                forecast_available = True
+
+            # Fetch solar forecast if configured (AC5: independent of weather)
+            if solar_entity:
+                try:
+                    state = hass.states.get(solar_entity)
+                    if state and state.state not in ("unavailable", "unknown"):
+                        solar_forecast_kwh_remaining = float(state.state)
+                        forecast_available = True  # AC5: partial data is useful
+                except (ValueError, AttributeError):
+                    pass  # solar failure non-critical
+
+            return ForecastData(
+                forecast_available=forecast_available,
+                cloud_coverage_avg=cloud_coverage_avg,
+                solar_forecast_kwh_remaining=solar_forecast_kwh_remaining,
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "Forecast unavailable: %s. Using conservative defaults.", exc
+            )
+            return ForecastData()
 
 
 class SurplusEngine:
@@ -275,9 +325,16 @@ class SurplusEngine:
         self.config = config
         self._calculator = SurplusCalculator(config)
         self._hysteresis = HysteresisFilter(config)
+        self._forecast_consumer = ForecastConsumer(config)
 
-    async def evaluate_cycle(self, snapshot: SensorSnapshot) -> EvaluationResult:
+    async def evaluate_cycle(
+        self, snapshot: SensorSnapshot, hass=None
+    ) -> EvaluationResult:
         """Run one evaluation cycle and return result."""
+        # Fetch forecast if hass provided and not yet in snapshot (Story 3.1 / AC6)
+        if hass is not None and snapshot.forecast is None:
+            snapshot.forecast = await self._forecast_consumer.get_forecast(hass)
+
         # 1. Pure calculation (Stories 2.1 + 2.2)
         calc = self._calculator.calculate_surplus(snapshot)
 

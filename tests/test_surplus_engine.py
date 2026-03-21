@@ -340,14 +340,278 @@ class TestSkeletonNotImplemented:
         hf.resume()
         assert hf.state == "INACTIVE"
 
-    def test_forecast_consumer_get_forecast_raises(self, se):
-        fc = se.ForecastConsumer(config={})
-        with pytest.raises(NotImplementedError):
-            asyncio.run(fc.get_forecast(hass=None))
-
     def test_forecast_consumer_stores_config(self, se):
         fc = se.ForecastConsumer(config={"weather": "weather.home"})
         assert fc.config == {"weather": "weather.home"}
+
+
+# ===========================================================================
+# Story 3.1 — ForecastConsumer.get_forecast
+# ===========================================================================
+
+class MockHassServices:
+    """Minimal hass.services stub for testing get_forecast."""
+    def __init__(self, response=None, raises=None):
+        self._response = response
+        self._raises = raises
+
+    async def async_call(self, domain, service, data, *, blocking, return_response):
+        if self._raises is not None:
+            raise self._raises
+        return self._response
+
+
+class MockHassState:
+    def __init__(self, state: str):
+        self.state = state
+
+
+class MockHass:
+    """Minimal hass stub with services and states support."""
+    def __init__(self, service_response=None, service_raises=None, states=None):
+        self.services = MockHassServices(
+            response=service_response, raises=service_raises
+        )
+        self._states: dict = states or {}
+
+    def states_get(self, entity_id: str):
+        return self._states.get(entity_id)
+
+    def __getattr__(self, name):
+        if name == "states":
+            return type("States", (), {"get": lambda _, eid: self._states.get(eid)})()
+        raise AttributeError(name)
+
+
+class TestForecastConsumerGetForecast:
+    """Unit tests for ForecastConsumer.get_forecast (Story 3.1)."""
+
+    @staticmethod
+    def _make_forecast_entries(cloud_values, extra=None):
+        """Build fake hourly forecast entries."""
+        entries = [{"datetime": f"2026-03-21T{i:02d}:00:00+00:00", "cloud_coverage": v}
+                   for i, v in enumerate(cloud_values)]
+        if extra:
+            entries.extend(extra)
+        return entries
+
+    # --- AC4: weather entity not configured → silent no-op ---
+
+    def test_ac4_no_weather_entity_returns_defaults(self, se):
+        """AC4: absent 'weather' key → ForecastData() with all defaults, no exception."""
+        fc = se.ForecastConsumer(config={"entities": {}})
+        result = asyncio.run(fc.get_forecast(hass=None))
+        assert result.forecast_available is False
+        assert result.cloud_coverage_avg == 50.0
+        assert result.solar_forecast_kwh_remaining is None
+
+    def test_ac4_no_entities_key_returns_defaults(self, se):
+        """AC4: missing 'entities' block → ForecastData() immediately."""
+        fc = se.ForecastConsumer(config={})
+        result = asyncio.run(fc.get_forecast(hass=None))
+        assert result.forecast_available is False
+
+    # --- AC1: weather forecast fetched, cloud_coverage_avg computed ---
+
+    def test_ac1_fetches_weather_service_and_returns_avg(self, se):
+        """AC1: calls weather.get_forecasts and averages cloud_coverage of first 6 entries."""
+        entries = self._make_forecast_entries([20, 40, 60, 80, 100, 10, 99])  # 7 entries, take first 6
+        response = {"weather.openweathermap": {"forecast": entries}}
+        hass = MockHass(service_response=response)
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.openweathermap"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+        expected_avg = (20 + 40 + 60 + 80 + 100 + 10) / 6
+        assert abs(result.cloud_coverage_avg - expected_avg) < 0.001
+
+    def test_ac1_only_first_six_entries_consumed(self, se):
+        """AC1: only first 6 entries are used (7th+ ignored)."""
+        entries = self._make_forecast_entries([0, 0, 0, 0, 0, 0, 100])  # 7th = 100, ignored
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(service_response=response)
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.cloud_coverage_avg == 0.0  # 100 was excluded
+
+    def test_ac1_entries_missing_cloud_coverage_skipped(self, se):
+        """AC1: entries without cloud_coverage key are silently excluded from avg."""
+        entries = [
+            {"datetime": "2026-03-21T10:00:00+00:00", "cloud_coverage": 40},
+            {"datetime": "2026-03-21T11:00:00+00:00"},  # no cloud_coverage
+            {"datetime": "2026-03-21T12:00:00+00:00", "cloud_coverage": 60},
+        ]
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(service_response=response)
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+        assert abs(result.cloud_coverage_avg - 50.0) < 0.001  # avg of 40 and 60
+
+    def test_ac1_all_entries_missing_cloud_coverage_uses_neutral(self, se):
+        """AC1: if no entry has cloud_coverage, avg defaults to 50.0."""
+        entries = [{"datetime": "2026-03-21T10:00:00+00:00"} for _ in range(3)]
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(service_response=response)
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+        assert result.cloud_coverage_avg == 50.0
+
+    def test_ac1_result_forecast_available_true(self, se):
+        """AC1: forecast_available is True after successful fetch."""
+        entries = self._make_forecast_entries([30, 30, 30])
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(service_response=response)
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+
+    # --- AC2: solar forecast entity state read ---
+
+    def test_ac2_solar_entity_state_parsed(self, se):
+        """AC2: forecast_solar entity state is read and parsed as float kWh."""
+        entries = self._make_forecast_entries([50])
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(
+            service_response=response,
+            states={"sensor.solar_remaining": MockHassState("3.75")},
+        )
+        fc = se.ForecastConsumer(config={
+            "entities": {
+                "weather": "weather.test",
+                "forecast_solar": "sensor.solar_remaining",
+            }
+        })
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.solar_forecast_kwh_remaining == pytest.approx(3.75)
+
+    def test_ac2_forecast_available_true_when_solar_also_fetched(self, se):
+        """AC2: forecast_available True when both weather and solar succeed."""
+        entries = self._make_forecast_entries([50])
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(
+            service_response=response,
+            states={"sensor.solar_remaining": MockHassState("2.0")},
+        )
+        fc = se.ForecastConsumer(config={
+            "entities": {
+                "weather": "weather.test",
+                "forecast_solar": "sensor.solar_remaining",
+            }
+        })
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+
+    # --- AC3: errors handled gracefully ---
+
+    def test_ac3_service_exception_returns_defaults(self, se):
+        """AC3: async_call raising Exception → ForecastData() with conservative defaults."""
+        hass = MockHass(service_raises=RuntimeError("HA offline"))
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is False
+        assert result.cloud_coverage_avg == 50.0
+        assert result.solar_forecast_kwh_remaining is None
+
+    def test_ac3_malformed_response_returns_defaults(self, se):
+        """AC3: malformed response dict (KeyError) → ForecastData() with defaults."""
+        # response missing the entity key
+        hass = MockHass(service_response={"wrong_key": {}})
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is False
+        assert result.cloud_coverage_avg == 50.0
+
+    def test_ac3_warning_logged_on_exception(self, se, caplog):
+        """AC3: warning is logged once when forecast fetch fails."""
+        hass = MockHass(service_raises=ValueError("bad data"))
+        fc = se.ForecastConsumer(config={"entities": {"weather": "weather.test"}})
+        with caplog.at_level(logging.WARNING):
+            asyncio.run(fc.get_forecast(hass=hass))
+        warning_msgs = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_msgs) >= 1
+        assert "Forecast unavailable" in warning_msgs[0].message
+
+    def test_ac3_unavailable_state_handled_gracefully(self, se):
+        """AC3: hass.states.get returning None → no exception, solar remains None."""
+        entries = self._make_forecast_entries([40])
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(
+            service_response=response,
+            states={},  # solar entity absent → states.get returns None
+        )
+        fc = se.ForecastConsumer(config={
+            "entities": {
+                "weather": "weather.test",
+                "forecast_solar": "sensor.missing",
+            }
+        })
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True  # weather fetch succeeded
+        assert result.solar_forecast_kwh_remaining is None  # solar failed gracefully
+
+    # --- AC5: partial config (only solar, no weather) ---
+
+    def test_ac5_only_solar_no_weather_returns_solar_data(self, se):
+        """AC5: config has forecast_solar but no weather → solar populated, forecast_available=True."""
+        hass = MockHass(states={"sensor.solar_remaining": MockHassState("5.0")})
+        fc = se.ForecastConsumer(config={
+            "entities": {"forecast_solar": "sensor.solar_remaining"}
+        })
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+        assert result.cloud_coverage_avg == 50.0  # neutral default (no weather)
+        assert result.solar_forecast_kwh_remaining == pytest.approx(5.0)
+
+    def test_ac5_solar_state_unavailable_string_skipped(self, se):
+        """AC5: solar state='unavailable' → solar_forecast_kwh_remaining stays None."""
+        entries = self._make_forecast_entries([60])
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(
+            service_response=response,
+            states={"sensor.solar_remaining": MockHassState("unavailable")},
+        )
+        fc = se.ForecastConsumer(config={
+            "entities": {
+                "weather": "weather.test",
+                "forecast_solar": "sensor.solar_remaining",
+            }
+        })
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+        assert result.solar_forecast_kwh_remaining is None
+
+    def test_ac5_solar_state_unknown_string_skipped(self, se):
+        """AC5: solar state='unknown' → solar_forecast_kwh_remaining stays None."""
+        entries = self._make_forecast_entries([60])
+        response = {"weather.test": {"forecast": entries}}
+        hass = MockHass(
+            service_response=response,
+            states={"sensor.solar_remaining": MockHassState("unknown")},
+        )
+        fc = se.ForecastConsumer(config={
+            "entities": {
+                "weather": "weather.test",
+                "forecast_solar": "sensor.solar_remaining",
+            }
+        })
+        result = asyncio.run(fc.get_forecast(hass=hass))
+        assert result.forecast_available is True
+        assert result.solar_forecast_kwh_remaining is None
+
+    # --- AC6: SurplusEngine has _forecast_consumer wired ---
+
+    def test_ac6_surplus_engine_has_forecast_consumer(self, se):
+        """AC6: SurplusEngine.__init__ creates _forecast_consumer attribute."""
+        engine = se.SurplusEngine(config={})
+        assert hasattr(engine, "_forecast_consumer")
+        assert isinstance(engine._forecast_consumer, se.ForecastConsumer)
+
+    def test_ac6_forecast_consumer_uses_same_config(self, se):
+        """AC6: _forecast_consumer receives same config as SurplusEngine."""
+        cfg = {"entities": {"weather": "weather.test"}, "hold_time_minutes": 5}
+        engine = se.SurplusEngine(config=cfg)
+        assert engine._forecast_consumer.config is cfg
 
 
 class TestSurplusEngineDefault:

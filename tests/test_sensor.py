@@ -456,7 +456,7 @@ class TestEvaluationTick:
 
         captured = {}
 
-        async def _capture(snap):
+        async def _capture(snap, hass=None):
             captured["snap"] = snap
             return se.EvaluationResult(
                 reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,
@@ -483,7 +483,7 @@ class TestEvaluationTick:
 
         captured = {}
 
-        async def _capture(snap):
+        async def _capture(snap, hass=None):
             captured["snap"] = snap
             return se.EvaluationResult(
                 reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,
@@ -577,7 +577,7 @@ class TestSunSolarBoundaryTimes:
 
         captured = {}
 
-        async def _capture(snap):
+        async def _capture(snap, hass=None):
             captured["snap"] = snap
             return se.EvaluationResult(
                 reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,
@@ -609,7 +609,7 @@ class TestSunSolarBoundaryTimes:
 
         captured = {}
 
-        async def _capture(snap):
+        async def _capture(snap, hass=None):
             captured["snap"] = snap
             return se.EvaluationResult(
                 reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,
@@ -638,7 +638,7 @@ class TestSunSolarBoundaryTimes:
 
         captured = {}
 
-        async def _capture(snap):
+        async def _capture(snap, hass=None):
             captured["snap"] = snap
             return se.EvaluationResult(
                 reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,
@@ -670,7 +670,7 @@ class TestSunSolarBoundaryTimes:
 
         captured = {}
 
-        async def _capture(snap):
+        async def _capture(snap, hass=None):
             captured["snap"] = snap
             return se.EvaluationResult(
                 reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,

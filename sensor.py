@@ -160,7 +160,7 @@ class SDM630SimSensor(SensorEntity):
             sunrise_time    = sunrise_time,
         )
 
-        result = await self._engine.evaluate_cycle(snapshot)
+        result = await self._engine.evaluate_cycle(snapshot, hass=self.hass)
 
         # Story 1.4: structured decision log
         _LOGGER.debug(
