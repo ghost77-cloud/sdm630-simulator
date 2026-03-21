@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-03-21T00:00:00"
-last_updated: "2026-03-21T14:00:00"
+last_updated: "2026-03-21T00:00:00"
 project: sdm630-simulator
 project_key: NOKEY
 tracking_system: file-system
@@ -64,11 +64,11 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4: Fail-Safe and Reliability — Sensor Monitoring and Fault Handling
-  epic-4: backlog
-  4-1-sensor-unavailability-detection-and-fail-safe: backlog
-  4-2-staleness-detection: backlog
-  4-3-hard-soc-floor-enforcement: backlog
-  4-4-sensor-value-range-validation: backlog
+  epic-4: in-progress
+  4-1-sensor-unavailability-detection-and-fail-safe: ready-for-dev
+  4-2-staleness-detection: ready-for-dev
+  4-3-hard-soc-floor-enforcement: ready-for-dev
+  4-4-sensor-value-range-validation: ready-for-dev
   epic-4-retrospective: optional
 
   # Epic 5: Test Infrastructure — Unit Tests for Pure Logic Components
