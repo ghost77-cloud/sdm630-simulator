@@ -91,9 +91,13 @@ def sensor_ctx():
     mock_parse_dt = MagicMock(
         return_value=datetime(2026, 6, 15, 20, 0, 0, tzinfo=timezone.utc)
     )
+    mock_utcnow = MagicMock(
+        return_value=datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    )
     ha_util    = types.ModuleType("homeassistant.util")
     ha_util_dt = types.ModuleType("homeassistant.util.dt")
     ha_util_dt.parse_datetime = mock_parse_dt
+    ha_util_dt.utcnow = mock_utcnow
     ha_util.dt = ha_util_dt
 
     # ── pymodbus stubs ────────────────────────────────────────────────────
@@ -170,6 +174,7 @@ def sensor_ctx():
         "track_time":     mock_track_time,
         "input_data_block": mock_idb,
         "parse_datetime": mock_parse_dt,
+        "utcnow":         mock_utcnow,
         "TOTAL_POWER":    TOTAL_POWER,
         "se":             se,
         "SensorEntityBase": _SensorEntity,
@@ -214,7 +219,21 @@ def _make_sensor(mod, hass, cfg):
         for role, eid in entities_cfg.items()
         if role in mod.ENTITY_ROLE_TO_CACHE_KEY
     }
+    s._cache_key_to_entity = {v: k for k, v in s._entity_to_cache_key.items()}
+    s._invalidation_reasons = {}
     return s
+
+
+def _make_valid_cache(now=None):
+    """Build a sensor cache with valid tuples for all required keys."""
+    if now is None:
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+    return {
+        "soc_percent":     (50.0, now, True),
+        "power_to_grid_w": (0.0,  now, True),
+        "pv_production_w": (0.0,  now, True),
+        "power_to_user_w": (0.0,  now, True),
+    }
 
 
 # ===========================================================================
@@ -354,30 +373,46 @@ class TestHandleStateChange:
         s = _make_sensor(mod, MagicMock(), sample_config)
         event = _make_event("sensor.battery_soc", "75.5")
         s._handle_state_change(event)
-        assert s._sensor_cache.get("soc_percent") == pytest.approx(75.5)
+        entry = s._sensor_cache.get("soc_percent")
+        assert entry is not None
+        assert entry[0] == pytest.approx(75.5)
+        assert entry[2] is True
 
     def test_power_to_grid_maps_correct_key(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
         s = _make_sensor(mod, MagicMock(), sample_config)
         event = _make_event("sensor.power_to_grid", "1200.0")
         s._handle_state_change(event)
-        assert s._sensor_cache.get("power_to_grid_w") == pytest.approx(1200.0)
+        entry = s._sensor_cache.get("power_to_grid_w")
+        assert entry is not None
+        assert entry[0] == pytest.approx(1200.0)
+        assert entry[2] is True
 
-    def test_state_unavailable_does_not_update_cache(self, sensor_ctx, sample_config):
+    def test_state_unavailable_marks_cache_invalid(self, sensor_ctx, sample_config):
+        """STATE_UNAVAILABLE stores (last_val, now, False) — is_valid=False."""
         mod, mocks = sensor_ctx
         s = _make_sensor(mod, MagicMock(), sample_config)
-        s._sensor_cache["soc_percent"] = 50.0   # pre-populate
+        _prior = datetime(2026, 6, 15, 11, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["soc_percent"] = (50.0, _prior, True)
         event = _make_event("sensor.battery_soc", "unavailable")
         s._handle_state_change(event)
-        assert s._sensor_cache.get("soc_percent") == pytest.approx(50.0)  # unchanged
+        entry = s._sensor_cache.get("soc_percent")
+        assert entry is not None
+        assert entry[0] == pytest.approx(50.0)  # prior value preserved
+        assert entry[2] is False                 # is_valid = False
 
-    def test_state_unknown_does_not_update_cache(self, sensor_ctx, sample_config):
+    def test_state_unknown_marks_cache_invalid(self, sensor_ctx, sample_config):
+        """STATE_UNKNOWN stores (last_val, now, False) — is_valid=False."""
         mod, mocks = sensor_ctx
         s = _make_sensor(mod, MagicMock(), sample_config)
-        s._sensor_cache["soc_percent"] = 60.0
+        _prior = datetime(2026, 6, 15, 11, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["soc_percent"] = (60.0, _prior, True)
         event = _make_event("sensor.battery_soc", "unknown")
         s._handle_state_change(event)
-        assert s._sensor_cache.get("soc_percent") == pytest.approx(60.0)
+        entry = s._sensor_cache.get("soc_percent")
+        assert entry is not None
+        assert entry[0] == pytest.approx(60.0)  # prior value preserved
+        assert entry[2] is False                 # is_valid = False
 
     def test_none_new_state_is_ignored(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
@@ -387,12 +422,16 @@ class TestHandleStateChange:
         s._handle_state_change(event)           # must not raise
         assert s._sensor_cache == {}
 
-    def test_invalid_numeric_string_does_not_update_cache(self, sensor_ctx, sample_config):
+    def test_invalid_numeric_string_marks_cache_invalid(self, sensor_ctx, sample_config):
+        """ValueError stores (last_val, now, False) — key IS present."""
         mod, mocks = sensor_ctx
         s = _make_sensor(mod, MagicMock(), sample_config)
         event = _make_event("sensor.battery_soc", "not-a-number")
         s._handle_state_change(event)
-        assert "soc_percent" not in s._sensor_cache
+        entry = s._sensor_cache.get("soc_percent")
+        assert entry is not None          # key IS present (with is_valid=False)
+        assert entry[0] == pytest.approx(0.0)  # default fallback value
+        assert entry[2] is False
 
     def test_no_modbus_write_in_handle_state_change(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
@@ -406,14 +445,20 @@ class TestHandleStateChange:
         s = _make_sensor(mod, MagicMock(), sample_config)
         event = _make_event("sensor.pv_power", "3500.0")
         s._handle_state_change(event)
-        assert s._sensor_cache.get("pv_production_w") == pytest.approx(3500.0)
+        entry = s._sensor_cache.get("pv_production_w")
+        assert entry is not None
+        assert entry[0] == pytest.approx(3500.0)
+        assert entry[2] is True
 
     def test_power_to_user_updates_cache(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
         s = _make_sensor(mod, MagicMock(), sample_config)
         event = _make_event("sensor.power_to_user", "900.0")
         s._handle_state_change(event)
-        assert s._sensor_cache.get("power_to_user_w") == pytest.approx(900.0)
+        entry = s._sensor_cache.get("power_to_user_w")
+        assert entry is not None
+        assert entry[0] == pytest.approx(900.0)
+        assert entry[2] is True
 
 
 # ===========================================================================
@@ -440,6 +485,7 @@ class TestEvaluationTick:
             reason="test", forecast_available=False,
         ))
         s._engine = mock_engine
+        s._sensor_cache.update(_make_valid_cache())
         self._run_tick(s)
         mock_engine.evaluate_cycle.assert_called_once()
 
@@ -463,6 +509,12 @@ class TestEvaluationTick:
                 soc_percent=0.0, soc_floor_active=50, charging_state="INACTIVE",
                 reason="test", forecast_available=False,
             )
+
+        _t = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["soc_percent"]     = (80.0,   _t, True)
+        s._sensor_cache["power_to_grid_w"] = (1500.0, _t, True)
+        s._sensor_cache["pv_production_w"] = (4000.0, _t, True)
+        s._sensor_cache["power_to_user_w"] = (2000.0, _t, True)
 
         s._engine = MagicMock()
         s._engine.evaluate_cycle = _capture
@@ -493,6 +545,13 @@ class TestEvaluationTick:
 
         s._engine = MagicMock()
         s._engine.evaluate_cycle = _capture
+        _t = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache.update({
+            "soc_percent":     (0.0, _t, True),
+            "power_to_grid_w": (0.0, _t, True),
+            "pv_production_w": (0.0, _t, True),
+            "power_to_user_w": (0.0, _t, True),
+        })
         self._run_tick(s)
         snap = captured["snap"]
         assert snap.soc_percent     == pytest.approx(0.0)
@@ -511,6 +570,7 @@ class TestEvaluationTick:
             soc_percent=75.0, soc_floor_active=50, charging_state="ACTIVE",
             reason="test", forecast_available=False,
         ))
+        s._sensor_cache.update(_make_valid_cache())
         self._run_tick(s)
         mocks["input_data_block"].set_float.assert_called_once_with(
             mocks["TOTAL_POWER"], pytest.approx(2.5)
@@ -528,6 +588,7 @@ class TestEvaluationTick:
             soc_percent=70.0, soc_floor_active=50, charging_state="ACTIVE",
             reason="test", forecast_available=False,
         ))
+        s._sensor_cache.update(_make_valid_cache())
         self._run_tick(s)
         assert s._attr_native_value == pytest.approx(3.7)
 
@@ -587,6 +648,7 @@ class TestSunSolarBoundaryTimes:
 
         s._engine = MagicMock()
         s._engine.evaluate_cycle = _capture
+        s._sensor_cache.update(_make_valid_cache())
         now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         asyncio.run(s._evaluation_tick(now))
 
@@ -619,6 +681,7 @@ class TestSunSolarBoundaryTimes:
 
         s._engine = MagicMock()
         s._engine.evaluate_cycle = _capture
+        s._sensor_cache.update(_make_valid_cache())
         asyncio.run(s._evaluation_tick(
             datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         ))
@@ -648,6 +711,7 @@ class TestSunSolarBoundaryTimes:
 
         s._engine = MagicMock()
         s._engine.evaluate_cycle = _capture
+        s._sensor_cache.update(_make_valid_cache())
         asyncio.run(s._evaluation_tick(
             datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         ))
@@ -680,6 +744,7 @@ class TestSunSolarBoundaryTimes:
 
         s._engine = MagicMock()
         s._engine.evaluate_cycle = _capture
+        s._sensor_cache.update(_make_valid_cache())
         asyncio.run(s._evaluation_tick(
             datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
         ))
@@ -874,6 +939,7 @@ class TestDebugDecisionLog:
         asyncio.run(s.async_added_to_hass())
         s._engine = MagicMock()
         s._engine.evaluate_cycle = AsyncMock(return_value=result)
+        s._sensor_cache.update(_make_valid_cache())
 
         with patch.object(mod._LOGGER, "debug") as mock_debug:
             asyncio.run(s._evaluation_tick(
@@ -946,6 +1012,7 @@ class TestFailsafeWarningLog:
         asyncio.run(s.async_added_to_hass())
         s._engine = MagicMock()
         s._engine.evaluate_cycle = AsyncMock(return_value=result)
+        s._sensor_cache.update(_make_valid_cache())
 
         with patch.object(mod._LOGGER, "warning") as mock_warn:
             asyncio.run(s._evaluation_tick(
@@ -967,6 +1034,7 @@ class TestFailsafeWarningLog:
         asyncio.run(s.async_added_to_hass())
         s._engine = MagicMock()
         s._engine.evaluate_cycle = AsyncMock(return_value=result)
+        s._sensor_cache.update(_make_valid_cache())
 
         with patch.object(mod._LOGGER, "warning") as mock_warn:
             asyncio.run(s._evaluation_tick(
@@ -986,6 +1054,7 @@ class TestFailsafeWarningLog:
         asyncio.run(s.async_added_to_hass())
         s._engine = MagicMock()
         s._engine.evaluate_cycle = AsyncMock(return_value=result)
+        s._sensor_cache.update(_make_valid_cache())
 
         with patch.object(mod._LOGGER, "warning") as mock_warn:
             asyncio.run(s._evaluation_tick(
@@ -1061,3 +1130,328 @@ class TestStartupLogFormat:
             ))
             args = mock_info.call_args[0][1:]
             assert args == (15, 4)  # 15s interval, 4 entities
+
+
+# ===========================================================================
+# Story 4.1 — Sensor Unavailability Detection and Fail-Safe
+# ===========================================================================
+
+
+class TestCacheFormatUpgrade:
+    """AC6 — Cache format is a 3-tuple (float, timestamp, is_valid)."""
+
+    def test_valid_state_stores_tuple(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        event = _make_event("sensor.battery_soc", "82.0")
+        s._handle_state_change(event)
+        entry = s._sensor_cache["soc_percent"]
+        assert isinstance(entry, tuple) and len(entry) == 3
+        assert entry[0] == pytest.approx(82.0)
+        assert entry[2] is True
+
+    def test_unavailable_stores_tuple_is_valid_false(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        _prior = datetime(2026, 6, 15, 10, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["soc_percent"] = (70.0, _prior, True)
+        event = _make_event("sensor.battery_soc", "unavailable")
+        s._handle_state_change(event)
+        entry = s._sensor_cache["soc_percent"]
+        assert entry[0] == pytest.approx(70.0)   # prior value preserved
+        assert entry[2] is False
+
+    def test_unknown_stores_tuple_is_valid_false(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        _prior = datetime(2026, 6, 15, 10, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["soc_percent"] = (65.0, _prior, True)
+        event = _make_event("sensor.battery_soc", "unknown")
+        s._handle_state_change(event)
+        entry = s._sensor_cache["soc_percent"]
+        assert entry[0] == pytest.approx(65.0)
+        assert entry[2] is False
+
+    def test_value_error_stores_tuple_is_valid_false(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        event = _make_event("sensor.battery_soc", "n/a")
+        s._handle_state_change(event)
+        entry = s._sensor_cache.get("soc_percent")
+        assert entry is not None
+        assert entry[2] is False
+
+    def test_unavailable_no_prior_value_falls_back_to_zero(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        # no prior cache entry
+        event = _make_event("sensor.battery_soc", "unavailable")
+        s._handle_state_change(event)
+        entry = s._sensor_cache["soc_percent"]
+        assert entry[0] == pytest.approx(0.0)
+        assert entry[2] is False
+
+    def test_failsafe_reason_logged_initially_none(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = mod.SDM630SimSensor("Test", MagicMock(), sample_config)
+        assert s._failsafe_reason_logged is None
+
+    # AC3 — reason suffix tracks STATE_UNKNOWN specifically
+    def test_unavailable_sets_invalidation_reason_unavailable(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        event = _make_event("sensor.battery_soc", "unavailable")
+        s._handle_state_change(event)
+        assert s._invalidation_reasons.get("soc_percent") == " = unavailable"
+
+    def test_unknown_sets_invalidation_reason_unknown(self, sensor_ctx, sample_config):
+        """AC3: STATE_UNKNOWN must produce '= unknown' in reason, not '= unavailable'."""
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        event = _make_event("sensor.battery_soc", "unknown")
+        s._handle_state_change(event)
+        assert s._invalidation_reasons.get("soc_percent") == " = unknown"
+
+    # AC4 — non-numeric reason suffix
+    def test_value_error_sets_invalidation_reason_non_numeric(self, sensor_ctx, sample_config):
+        """AC4: ValueError must produce ': non-numeric value' suffix."""
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        event = _make_event("sensor.battery_soc", "error")
+        s._handle_state_change(event)
+        assert s._invalidation_reasons.get("soc_percent") == ": non-numeric value"
+
+    def test_valid_state_clears_invalidation_reason(self, sensor_ctx, sample_config):
+        """Recovery: valid state removes the invalidation reason entry."""
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        # First: mark invalid
+        event_bad = _make_event("sensor.battery_soc", "unavailable")
+        s._handle_state_change(event_bad)
+        assert "soc_percent" in s._invalidation_reasons
+        # Then: valid state
+        event_good = _make_event("sensor.battery_soc", "80.0")
+        s._handle_state_change(event_good)
+        assert "soc_percent" not in s._invalidation_reasons
+
+
+class TestCheckCacheValidity:
+    """AC1/AC2/AC3/AC4 — _check_cache_validity returns (valid, reason)."""
+
+    def test_all_valid_returns_true(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        s._sensor_cache.update(_make_valid_cache())
+        valid, reason = s._check_cache_validity()
+        assert valid is True
+        assert reason == ""
+
+    def test_missing_entry_returns_false_with_entity_id(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        # only soc is missing
+        s._sensor_cache.update(_make_valid_cache())
+        del s._sensor_cache["soc_percent"]
+        valid, reason = s._check_cache_validity()
+        assert valid is False
+        assert "sensor.battery_soc" in reason  # entity_id from config
+
+    def test_invalid_entry_returns_false_with_entity_id(self, sensor_ctx, sample_config):
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        s._sensor_cache.update(_make_valid_cache())
+        _now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["power_to_grid_w"] = (0.0, _now, False)
+        valid, reason = s._check_cache_validity()
+        assert valid is False
+        assert "sensor.power_to_grid" in reason
+
+    def test_first_invalid_key_reported(self, sensor_ctx, sample_config):
+        """Only the first invalid key is reported."""
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        _now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        # Two invalid entries — only first (soc) should be reported
+        s._sensor_cache["soc_percent"]     = (0.0, _now, False)
+        s._sensor_cache["power_to_grid_w"] = (0.0, _now, False)
+        s._sensor_cache["pv_production_w"] = (0.0, _now, True)
+        s._sensor_cache["power_to_user_w"] = (0.0, _now, True)
+        valid, reason = s._check_cache_validity()
+        assert valid is False
+        assert "sensor.battery_soc" in reason
+
+    # AC3 — STATE_UNKNOWN reason string must say "= unknown"
+    def test_unknown_state_reason_contains_unknown(self, sensor_ctx, sample_config):
+        """AC3: reason from _check_cache_validity must say '= unknown' for STATE_UNKNOWN."""
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        s._sensor_cache.update(_make_valid_cache())
+        _now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        s._sensor_cache["soc_percent"] = (50.0, _now, False)
+        s._invalidation_reasons["soc_percent"] = " = unknown"
+        valid, reason = s._check_cache_validity()
+        assert valid is False
+        assert "= unknown" in reason
+        assert "sensor.battery_soc" in reason
+
+    # AC4 — ValueError reason string must say ": non-numeric value"
+    def test_non_numeric_reason_via_state_change(self, sensor_ctx, sample_config):
+        """AC4: full path — handle_state_change ValueError → check_cache_validity reason."""
+        mod, _ = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        s._sensor_cache.update(_make_valid_cache())
+        event = _make_event("sensor.battery_soc", "n/a")
+        s._handle_state_change(event)
+        valid, reason = s._check_cache_validity()
+        assert valid is False
+        assert ": non-numeric value" in reason
+        assert "sensor.battery_soc" in reason
+
+
+class TestFailSafeEvaluationTick:
+    """AC2/AC3/AC4/AC5 — _evaluation_tick FAILSAFE and recovery paths."""
+
+    def _run_tick(self, sensor, now=None):
+        if now is None:
+            now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        return asyncio.run(sensor._evaluation_tick(now))
+
+    def test_failsafe_calls_force_failsafe_on_hysteresis(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        asyncio.run(s.async_added_to_hass())
+        mock_engine = MagicMock()
+        s._engine = mock_engine
+        # cache empty → FAILSAFE
+        self._run_tick(s)
+        mock_engine.hysteresis_filter.force_failsafe.assert_called_once()
+        reason_arg = mock_engine.hysteresis_filter.force_failsafe.call_args[0][0]
+        assert "sensor.battery_soc" in reason_arg
+
+    def test_failsafe_writes_zero_to_modbus(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        mocks["input_data_block"].set_float.reset_mock()
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        self._run_tick(s)
+        mocks["input_data_block"].set_float.assert_called_once_with(
+            mocks["TOTAL_POWER"], pytest.approx(0.0)
+        )
+
+    def test_failsafe_does_not_call_evaluate_cycle(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        s = _make_sensor(mod, MagicMock(), sample_config)
+        asyncio.run(s.async_added_to_hass())
+        mock_engine = MagicMock()
+        s._engine = mock_engine
+        self._run_tick(s)
+        mock_engine.evaluate_cycle.assert_not_called()
+
+    def test_warn_once_first_tick_emits_warning(self, sensor_ctx, sample_config):
+        """AC7: first FAILSAFE tick emits WARNING."""
+        mod, mocks = sensor_ctx
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+
+        with patch.object(mod._LOGGER, "warning") as mock_warn:
+            self._run_tick(s)
+            assert mock_warn.call_count == 1
+            assert "SDM630 FAIL-SAFE:" in mock_warn.call_args[0][0]
+
+    def test_warn_once_second_tick_uses_debug_not_warning(self, sensor_ctx, sample_config):
+        """AC7: repeated FAILSAFE ticks log DEBUG, not WARNING."""
+        mod, mocks = sensor_ctx
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        asyncio.run(s._evaluation_tick(now))  # first tick → sets _failsafe_reason_logged
+
+        with patch.object(mod._LOGGER, "warning") as mock_warn, \
+             patch.object(mod._LOGGER, "debug") as mock_debug:
+            asyncio.run(s._evaluation_tick(now))  # second tick
+            mock_warn.assert_not_called()
+            ongoing = [c for c in mock_debug.call_args_list
+                       if "ongoing" in str(c[0][0]).lower() or
+                          "FAIL-SAFE (ongoing)" in str(c[0][0])]
+            assert len(ongoing) == 1
+
+    def test_recovery_calls_resume_and_logs_info(self, sensor_ctx, sample_config):
+        """AC5: after FAILSAFE, restoring valid cache triggers resume() + INFO log."""
+        mod, mocks = sensor_ctx
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+
+        mock_engine = MagicMock()
+        mock_engine.evaluate_cycle = AsyncMock(return_value=_make_result(
+            mocks["se"], charging_state="INACTIVE", reason="no_surplus",
+        ))
+        s._engine = mock_engine
+
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        # First tick: cache empty → FAILSAFE → _failsafe_reason_logged set
+        asyncio.run(s._evaluation_tick(now))
+        assert s._failsafe_reason_logged is not None
+
+        # Fix cache → all valid
+        s._sensor_cache.update(_make_valid_cache(now))
+
+        with patch.object(mod._LOGGER, "info") as mock_info:
+            asyncio.run(s._evaluation_tick(now))  # second tick: recovery
+            mock_engine.hysteresis_filter.resume.assert_called_once()
+            recovery_calls = [c for c in mock_info.call_args_list
+                              if "recovered" in str(c[0][0]).lower()]
+            assert len(recovery_calls) == 1
+
+    def test_recovery_resets_failsafe_reason_logged(self, sensor_ctx, sample_config):
+        """AC5: _failsafe_reason_logged cleared on recovery."""
+        mod, mocks = sensor_ctx
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+
+        mock_engine = MagicMock()
+        mock_engine.evaluate_cycle = AsyncMock(return_value=_make_result(
+            mocks["se"], charging_state="INACTIVE", reason="no_surplus",
+        ))
+        s._engine = mock_engine
+
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        asyncio.run(s._evaluation_tick(now))      # FAILSAFE
+        assert s._failsafe_reason_logged is not None
+        s._sensor_cache.update(_make_valid_cache(now))
+        asyncio.run(s._evaluation_tick(now))      # recovery
+        assert s._failsafe_reason_logged is None
+
+    def test_normal_evaluation_after_recovery(self, sensor_ctx, sample_config):
+        """AC5: evaluate_cycle is called normally after recovery."""
+        mod, mocks = sensor_ctx
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        se = mocks["se"]
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+
+        mock_engine = MagicMock()
+        mock_engine.evaluate_cycle = AsyncMock(return_value=_make_result(
+            se, reported_kw=1.5, charging_state="ACTIVE",
+        ))
+        s._engine = mock_engine
+
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        asyncio.run(s._evaluation_tick(now))      # FAILSAFE
+        mock_engine.evaluate_cycle.assert_not_called()
+
+        s._sensor_cache.update(_make_valid_cache(now))
+        asyncio.run(s._evaluation_tick(now))      # recovery + normal evaluation
+        mock_engine.evaluate_cycle.assert_called_once()

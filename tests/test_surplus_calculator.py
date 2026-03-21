@@ -236,17 +236,17 @@ class TestAC5SocFloorActive:
 # ===========================================================================
 
 class TestAC6WallboxIncludedInLoad:
-    """When ACTIVE, reason contains 'wallbox_included_in_load'."""
+    """When ACTIVE, reason starts with 'wallbox_included_in_load'."""
 
     def test_reason_when_active(self, se):
         calc = se.SurplusCalculator(STANDARD_CONFIG)
         result = calc.calculate_surplus(_snap(se, pv_w=8000, user_w=1200, soc_pct=100))
-        assert result.reason == "wallbox_included_in_load"
+        assert result.reason == "wallbox_included_in_load|forecast_unavailable"
 
     def test_reason_when_inactive(self, se):
         calc = se.SurplusCalculator(STANDARD_CONFIG)
         result = calc.calculate_surplus(_snap(se, pv_w=1000, user_w=500, soc_pct=50))
-        assert result.reason == "surplus_below_threshold"
+        assert result.reason == "surplus_below_threshold|forecast_unavailable"
 
 
 # ===========================================================================
@@ -318,3 +318,334 @@ class TestEdgeCases:
         result = calc.calculate_surplus(snap)
         gap = max(0.0, STANDARD_CONFIG["wallbox_threshold_kw"] - result.real_surplus_kw)
         assert result.buffer_used_kw <= gap + 1e-9
+
+
+# ===========================================================================
+# Story 3.2 — Forecast-Driven SOC Target Adjustment
+# ===========================================================================
+
+# Config for forecast tests: midday window active (before=sunset-3h), March=80, Dec=100
+MARCH_CONFIG: dict = {
+    "wallbox_threshold_kw": 4.2,
+    "hold_time_minutes": 10,
+    "max_discharge_kw": 10.0,
+    "battery_capacity_kwh": 10.0,
+    "seasonal_targets": {3: 80, 12: 100},
+    "time_strategy": [
+        {"before": "sunrise+2h", "soc_floor": 100},
+        {"before": "sunset-3h", "soc_floor": 50},
+        {"default": True, "soc_floor": 80},
+    ],
+}
+
+
+def _forecast_snap(
+    se,
+    *,
+    cloud_avg: float,
+    hour: int,
+    month: int = 3,
+    soc: float = 80.0,
+    forecast_available: bool = True,
+    solar_remaining=None,
+    pv: float = 5000.0,
+    load: float = 1200.0,
+):
+    """Build a SensorSnapshot with a ForecastData for forecast tests."""
+    ts = datetime(2026, month, 21, hour, 0, 0)
+    # sunrise well before hour; sunset well after: midday window active when hour<17
+    sunrise = datetime(2026, month, 21, 6, 0, 0)
+    sunset = datetime(2026, month, 21, 20, 0, 0)
+    fd = se.ForecastData(
+        forecast_available=forecast_available,
+        cloud_coverage_avg=cloud_avg,
+        solar_forecast_kwh_remaining=solar_remaining,
+    )
+    return se.SensorSnapshot(
+        soc_percent=soc,
+        power_to_grid_w=0.0,
+        pv_production_w=pv,
+        power_to_user_w=load,
+        timestamp=ts,
+        sunset_time=sunset,
+        sunrise_time=sunrise,
+        forecast=fd,
+    )
+
+
+class TestForecastAdjustment:
+    """Story 3.2 — _apply_forecast_adjustment (AC1–AC8)."""
+
+    # ── AC1 — Sunny forecast: floor unchanged, reason=forecast_good ──────────
+
+    def test_ac1_sunny_floor_unchanged(self, se):
+        """cloud<20, hour<15, solar ok → floor from get_soc_floor, tag=forecast_good."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=10.0, hour=10, month=3, soc=80.0)
+        base = calc.get_soc_floor(snap)
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, base)
+        assert adj_floor == base
+        assert tag == "forecast_good"
+
+    def test_ac1_reason_in_calculate_surplus(self, se):
+        """calculate_surplus reason contains 'forecast_good' when sunny."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=10.0, hour=10, month=3, soc=80.0)
+        result = calc.calculate_surplus(snap)
+        assert "forecast_good" in result.reason
+
+    def test_ac1_forecast_available_true(self, se):
+        """result.forecast_available=True when ForecastData.forecast_available=True."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=10.0, hour=10, month=3, soc=80.0)
+        result = calc.calculate_surplus(snap)
+        assert result.forecast_available is True
+
+    # ── AC2 — Overcast forecast: floor raised to seasonal target ─────────────
+
+    def test_ac2_march_floor_raised_to_80(self, se):
+        """cloud>70, hour>=13, March → floor == 80."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=80.0, hour=14, month=3, soc=55.0)
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert adj_floor == 80
+        assert tag == "forecast_poor"
+
+    def test_ac2_december_floor_raised_to_100(self, se):
+        """cloud>70, hour>=13, December → floor = 100."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=90.0, hour=15, month=12, soc=60.0)
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert adj_floor == 100
+        assert tag == "forecast_poor"
+
+    def test_ac2_reason_in_calculate_surplus(self, se):
+        """calculate_surplus reason contains 'forecast_poor' when overcast."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=80.0, hour=14, month=3, soc=55.0)
+        result = calc.calculate_surplus(snap)
+        assert "forecast_poor" in result.reason
+
+    def test_ac2_forecast_available_true(self, se):
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=80.0, hour=14, month=3, soc=55.0)
+        result = calc.calculate_surplus(snap)
+        assert result.forecast_available is True
+
+    # ── AC3 — Forecast unavailable: no change ────────────────────────────────
+
+    def test_ac3_forecast_false_floor_unchanged(self, se):
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=80.0, hour=14, month=3, soc=55.0, forecast_available=False
+        )
+        base = 55
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, base)
+        assert adj_floor == base
+        assert tag == "forecast_unavailable"
+
+    def test_ac3_forecast_none_floor_unchanged(self, se):
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = se.SensorSnapshot(
+            soc_percent=55.0,
+            power_to_grid_w=0.0,
+            pv_production_w=5000.0,
+            power_to_user_w=1200.0,
+            timestamp=datetime(2026, 3, 21, 14, 0, 0),
+            sunset_time=datetime(2026, 3, 21, 20, 0, 0),
+            sunrise_time=datetime(2026, 3, 21, 6, 0, 0),
+            forecast=None,
+        )
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, 55)
+        assert adj_floor == 55
+        assert tag == "forecast_unavailable"
+
+    def test_ac3_forecast_available_false_in_result(self, se):
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=80.0, hour=14, month=3, soc=55.0, forecast_available=False
+        )
+        result = calc.calculate_surplus(snap)
+        assert result.forecast_available is False
+
+    # ── AC6 — Boundary: exactly at thresholds → neutral path ─────────────────
+
+    def test_ac6_cloud_exactly_20_not_sunny(self, se):
+        """cloud_avg=20 (not strictly <20) → sunny fast-path NOT taken."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=20.0, hour=10, month=3, soc=80.0)
+        base = 50
+        _, tag = calc._apply_forecast_adjustment(snap, base)
+        assert tag != "forecast_good"
+
+    def test_ac6_cloud_exactly_70_not_overcast(self, se):
+        """cloud_avg=70 (not strictly >70) → overcast fast-path NOT taken."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=70.0, hour=13, month=3, soc=80.0)
+        base = 50
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, base)
+        assert tag not in ("forecast_poor", "forecast_solar_low")
+        assert adj_floor == base
+
+    # ── AC7 — Hard floor guarantee: adjusted floor never below SOC_HARD_FLOOR ─
+
+    def test_ac7_seasonal_target_below_hard_floor_clamped(self, se):
+        """seasonal_target=30 → clamped to SOC_HARD_FLOOR (50)."""
+        cfg = {**MARCH_CONFIG, "seasonal_targets": {3: 30}}
+        calc = se.SurplusCalculator(cfg)
+        snap = _forecast_snap(se, cloud_avg=80.0, hour=14, month=3, soc=55.0)
+        adj_floor, _ = calc._apply_forecast_adjustment(snap, 50)
+        assert adj_floor >= se.SOC_HARD_FLOOR
+
+    # ── AC8 — Low solar remaining: floor raised independent of cloud coverage ─
+
+    def test_ac8_solar_low_raises_floor(self, se):
+        """solar_remaining=1.5 < 2.0, hour>=12 → floor raised, tag=forecast_solar_low."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=55.0, solar_remaining=1.5
+        )
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert adj_floor >= 80
+        assert tag == "forecast_solar_low"
+
+    def test_ac8_solar_above_threshold_neutral(self, se):
+        """solar_remaining=5.0 ≥ 2.0 → neutral path, floor unchanged."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=55.0, solar_remaining=5.0
+        )
+        base = 50
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, base)
+        assert adj_floor == base
+        assert tag == "forecast_neutral"
+
+    def test_ac8_solar_none_cloud_neutral(self, se):
+        """solar_remaining=None, cloud=50 (neutral) → neutral path."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=55.0, solar_remaining=None
+        )
+        base = 50
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, base)
+        assert adj_floor == base
+        assert tag == "forecast_neutral"
+
+    def test_ac8_solar_low_before_noon_not_triggered(self, se):
+        """solar_remaining=0.5 but hour=10 (<12) → not triggered (too early)."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=10, month=3, soc=55.0, solar_remaining=0.5
+        )
+        base = 50
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, base)
+        assert tag not in ("forecast_solar_low", "forecast_poor")
+        assert adj_floor == base
+
+    def test_ac8_reason_in_calculate_surplus(self, se):
+        """calculate_surplus reason contains 'forecast_solar_low' when solar low."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=55.0, solar_remaining=1.5
+        )
+        result = calc.calculate_surplus(snap)
+        assert "forecast_solar_low" in result.reason
+
+    # ── CR Patch: boundary tests (hour=12 solar, hour=15 sunny, hour=12 cloud,
+    #    solar=threshold, cross-path, custom threshold, NaN, caplog) ───────────
+
+    def test_ac8_hour_exactly_12_triggers_solar_low(self, se):
+        """hour=12 (>= 12) with solar below threshold → forecast_solar_low."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=12, month=3, soc=55.0, solar_remaining=1.0
+        )
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag == "forecast_solar_low"
+
+    def test_ac8_hour_11_does_not_trigger_solar_low(self, se):
+        """hour=11 (< 12) with solar below threshold → NOT solar_low."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=11, month=3, soc=55.0, solar_remaining=0.5
+        )
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag != "forecast_solar_low"
+
+    def test_ac6_hour_15_not_sunny(self, se):
+        """cloud<20: hour=15 (NOT < 15) → sunny fast-path NOT taken."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=10.0, hour=15, month=3, soc=80.0)
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag != "forecast_good"
+
+    def test_ac6_hour_12_cloud_above_70_not_overcast(self, se):
+        """cloud>70: hour=12 (NOT >= 13) → overcast path NOT taken."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(se, cloud_avg=80.0, hour=12, month=3, soc=80.0)
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag != "forecast_poor"
+
+    def test_ac8_solar_exactly_at_threshold_not_triggered(self, se):
+        """solar_remaining=2.0 (== threshold, not < threshold) → NOT solar_low."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=55.0, solar_remaining=2.0
+        )
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag != "forecast_solar_low"
+
+    def test_cross_path_sunny_cloud_but_solar_low(self, se):
+        """cloud<20, hour=13 (in [12,14]), solar_remaining low → forecast_solar_low."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=10.0, hour=13, month=3, soc=55.0, solar_remaining=0.5
+        )
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag == "forecast_solar_low"
+        assert adj_floor >= 80
+
+    def test_ac8_custom_threshold_config(self, se):
+        """Custom solar_remaining_threshold_kwh=5.0 → solar=3.0 triggers solar_low."""
+        cfg = {**MARCH_CONFIG, "solar_remaining_threshold_kwh": 5.0}
+        calc = se.SurplusCalculator(cfg)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=55.0, solar_remaining=3.0
+        )
+        adj_floor, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag == "forecast_solar_low"
+        assert adj_floor >= 80
+
+    def test_nan_cloud_treated_as_neutral(self, se):
+        """NaN cloud_coverage_avg → sanitised to 50.0 (neutral)."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=float("nan"), hour=14, month=3, soc=80.0
+        )
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        assert tag == "forecast_neutral"
+
+    def test_nan_solar_remaining_treated_as_none(self, se):
+        """NaN solar_forecast_kwh_remaining → sanitised to None (neutral)."""
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=50.0, hour=14, month=3, soc=80.0,
+            solar_remaining=float("nan"),
+        )
+        _, tag = calc._apply_forecast_adjustment(snap, 50)
+        # NaN → None, cloud=50 neutral → forecast_neutral
+        assert tag == "forecast_neutral"
+
+    def test_ac3_no_warning_logged(self, se, caplog):
+        """AC3: forecast unavailable → no WARNING logged."""
+        import logging
+        calc = se.SurplusCalculator(MARCH_CONFIG)
+        snap = _forecast_snap(
+            se, cloud_avg=80.0, hour=14, month=3, soc=55.0, forecast_available=False
+        )
+        with caplog.at_level(logging.WARNING):
+            calc.calculate_surplus(snap)
+        assert not any(
+            r.levelno >= logging.WARNING for r in caplog.records
+        ), f"Unexpected WARNING records: {[r.message for r in caplog.records if r.levelno >= logging.WARNING]}"
+

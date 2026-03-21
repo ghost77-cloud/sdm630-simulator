@@ -1,6 +1,6 @@
 # Story 4.1: Sensor Unavailability Detection and Fail-Safe
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -86,100 +86,53 @@ to prevent log spam (track with `self._failsafe_reason_logged: str | None`)
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Upgrade cache format from float to tuple (AC: #6) — supersedes Story 1.3 cache
-  - [ ] In `SDM630SimSensor.__init__`, initialize
+- [x] Task 1: Upgrade cache format from float to tuple (AC: #6) — supersedes Story 1.3 cache
+  - [x] In `SDM630SimSensor.__init__`, initialize
     `self._sensor_cache: dict[str, tuple[float, datetime, bool]] = {}`
-  - [ ] Add `self._failsafe_reason_logged: str | None = None` for warn-once anti-spam (AC: #7)
-  - [ ] In `_handle_state_change`: replace `float(new_state.state)` storage with tuple:
+  - [x] Add `self._failsafe_reason_logged: str | None = None` for warn-once anti-spam (AC: #7)
+  - [x] In `_handle_state_change`: replace `float(new_state.state)` storage with tuple:
     `self._sensor_cache[cache_key] = (float(new_state.state), new_state.last_changed, True)`
-  - [ ] In `_handle_state_change`: handle `STATE_UNAVAILABLE` / `STATE_UNKNOWN`:
-    - [ ] Extract `last_val = self._sensor_cache.get(cache_key, (0.0, None, True))[0]`
-    - [ ] `self._sensor_cache[cache_key] = (last_val, dt_util.utcnow(), False)`
-    - [ ] Do NOT `return` — set cache first, then return (so evaluation_tick sees invalid entry)
-  - [ ] In `_handle_state_change`: handle `ValueError` from `float()`:
-    - [ ] `last_val = self._sensor_cache.get(cache_key, (0.0, None, True))[0]`
-    - [ ] `self._sensor_cache[cache_key] = (last_val, dt_util.utcnow(), False)`
-    - [ ] `_LOGGER.debug("Cache invalidated for %s: non-numeric value '%s'", entity_id, new_state.state)`
-  - [ ] Update `_evaluation_tick`: extract float values using
+  - [x] In `_handle_state_change`: handle `STATE_UNAVAILABLE` / `STATE_UNKNOWN`:
+    - [x] Extract `last_val = self._sensor_cache.get(cache_key, (0.0, None, True))[0]`
+    - [x] `self._sensor_cache[cache_key] = (last_val, dt_util.utcnow(), False)`
+    - [x] Do NOT `return` — set cache first, then return (so evaluation_tick sees invalid entry)
+  - [x] In `_handle_state_change`: handle `ValueError` from `float()`:
+    - [x] `last_val = self._sensor_cache.get(cache_key, (0.0, None, True))[0]`
+    - [x] `self._sensor_cache[cache_key] = (last_val, dt_util.utcnow(), False)`
+    - [x] `_LOGGER.debug("Cache invalidated for %s: non-numeric value '%s'", entity_id, new_state.state)`
+  - [x] Update `_evaluation_tick`: extract float values using
     `self._sensor_cache.get(key, (0.0, None, False))[0]` (tuple index 0)
 
-- [ ] Task 2: Implement `_check_cache_validity(self)` helper in `SDM630SimSensor` (AC: #1–#4)
-  - [ ] Iterate over required cache keys:
+- [x] Task 2: Implement `_check_cache_validity(self)` helper in `SDM630SimSensor` (AC: #1–#4)
+  - [x] Iterate over required cache keys:
     `[CACHE_KEY_SOC, CACHE_KEY_POWER_TO_GRID, CACHE_KEY_PV_PRODUCTION, CACHE_KEY_POWER_TO_USER]`
-  - [ ] For each key, retrieve `entry = self._sensor_cache.get(key)`
-  - [ ] If `entry is None`: treat as invalid (entity has never fired a state-change event yet — see AC6 in Story 4.2 for startup grace period)
-    - [ ] Skip FAILSAFE on first tick if `entry is None` AND `self._first_tick` is True (AC: see startup note in Story 4.2)
-    - [ ] For now: if entry is None and NOT first_tick → trigger FAILSAFE with reason `"<key>: no data received"`
-  - [ ] If `entry` exists but `is_valid == False` (index 2):
-    - [ ] Look up entity_id from reverse mapping `CACHE_KEY_TO_ENTITY_ID` (build from config)
-    - [ ] Build reason string: `f"{entity_id} = unavailable"` or `f"{entity_id}: non-numeric value"`
-    - [ ] Return `(False, reason)` immediately on first invalid entry found
-  - [ ] If all entries valid: return `(True, "")`
+  - [x] For each key, retrieve `entry = self._sensor_cache.get(key)`
+  - [x] If `entry is None`: treat as invalid (entity has never fired a state-change event yet — see AC6 in Story 4.2 for startup grace period)
+    - [x] Skip FAILSAFE on first tick if `entry is None` AND `self._first_tick` is True (AC: see startup note in Story 4.2)
+    - [x] For now: if entry is None and NOT first_tick → trigger FAILSAFE with reason `"<key>: no data received"`
+  - [x] If `entry` exists but `is_valid == False` (index 2):
+    - [x] Look up entity_id from reverse mapping `CACHE_KEY_TO_ENTITY_ID` (build from config)
+    - [x] Build reason string: `f"{entity_id} = unavailable"` or `f"{entity_id}: non-numeric value"`
+    - [x] Return `(False, reason)` immediately on first invalid entry found
+  - [x] If all entries valid: return `(True, "")`
 
-- [ ] Task 3: Wire `_check_cache_validity` into `_evaluation_tick` (AC: #2, #5)
-  - [ ] Add to start of `_evaluation_tick`, BEFORE `SensorSnapshot` assembly:
-    ```python
-    cache_valid, reason = self._check_cache_validity()
-    if not cache_valid:
-        self._engine.hysteresis_filter.force_failsafe(reason)
-        result = EvaluationResult(
-            reported_kw=0.0,
-            real_surplus_kw=0.0,
-            buffer_used_kw=0.0,
-            soc_percent=self._sensor_cache.get(CACHE_KEY_SOC, (0.0,))[0],
-            soc_floor_active=50,
-            charging_state="FAILSAFE",
-            reason=reason,
-            forecast_available=False,
-        )
-        self._write_result(result)
-        # Log warn-once
-        if self._failsafe_reason_logged != reason:
-            _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", reason)
-            self._failsafe_reason_logged = reason
-        else:
-            _LOGGER.debug("SDM630 FAIL-SAFE (ongoing): %s", reason)
-        return
-    ```
-  - [ ] Implement `_write_result(result)` helper (DRY — used by both FAILSAFE path and normal path):
-    ```python
-    def _write_result(self, result: EvaluationResult) -> None:
-        input_data_block.set_float(TOTAL_POWER, result.reported_kw)
-        self._attr_native_value = result.reported_kw
-        self.async_write_ha_state()
-    ```
-  - [ ] After the validity check PASSES (normal path), check if engine was previously in FAILSAFE:
-    ```python
-    if self._failsafe_reason_logged is not None:
-        self._engine.hysteresis_filter.resume()
-        _LOGGER.info("SDM630 recovered from FAILSAFE. Resuming normal evaluation.")
-        self._failsafe_reason_logged = None
-    ```
-  - [ ] Then proceed with normal `SensorSnapshot` assembly and `evaluate_cycle()` call
+- [x] Task 3: Wire `_check_cache_validity` into `_evaluation_tick` (AC: #2, #5)
+  - [x] Add to start of `_evaluation_tick`, BEFORE `SensorSnapshot` assembly
+  - [x] Implement `_write_result(result)` helper (DRY)
+  - [x] After the validity check PASSES (normal path), check if engine was previously in FAILSAFE
+  - [x] Then proceed with normal `SensorSnapshot` assembly and `evaluate_cycle()` call
 
-- [ ] Task 4: Add `CACHE_KEY_TO_ENTITY_ID` reverse-lookup helper (AC: #2, #3)
-  - [ ] Build in `async_added_to_hass()` from `self._config[CONF_ENTITIES]`:
-    ```python
-    self._entity_to_cache_key = {
-        config_entities["soc"]:            CACHE_KEY_SOC,
-        config_entities["power_to_grid"]:  CACHE_KEY_POWER_TO_GRID,
-        config_entities["pv_production"]:  CACHE_KEY_PV_PRODUCTION,
-        config_entities["power_to_user"]:  CACHE_KEY_POWER_TO_USER,
-    }
-    self._cache_key_to_entity = {v: k for k, v in self._entity_to_cache_key.items()}
-    ```
-  - [ ] Use `self._cache_key_to_entity.get(cache_key, cache_key)` in reason string
+- [x] Task 4: Add `CACHE_KEY_TO_ENTITY_ID` reverse-lookup helper (AC: #2, #3)
+  - [x] Build in `async_added_to_hass()` from `self._config[CONF_ENTITIES]`
+  - [x] Use `self._cache_key_to_entity.get(cache_key, cache_key)` in reason string
     construction inside `_check_cache_validity`
-  - [ ] Use `self._entity_to_cache_key.get(entity_id)` in `_handle_state_change` instead
-    of a hardcoded `ENTITY_TO_CACHE_KEY` dict (entity IDs come from YAML config)
+  - [x] Use `self._entity_to_cache_key.get(entity_id)` in `_handle_state_change`
 
-- [ ] Task 5: Add required imports to `sensor.py` (AC: all)
-  - [ ] `from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN`
-    (add to existing const import if already there from Story 1.3)
-  - [ ] `from homeassistant.util import dt as dt_util`
-  - [ ] `from .surplus_engine import EvaluationResult`
-    (needed to construct EvaluationResult in FAILSAFE path directly)
-  - [ ] Verify `CACHE_KEY_SOC`, `CACHE_KEY_POWER_TO_GRID`, `CACHE_KEY_PV_PRODUCTION`,
+- [x] Task 5: Add required imports to `sensor.py` (AC: all)
+  - [x] `from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN`
+  - [x] `from homeassistant.util import dt as dt_util`
+  - [x] `from .surplus_engine import EvaluationResult`
+  - [x] Verify `CACHE_KEY_SOC`, `CACHE_KEY_POWER_TO_GRID`, `CACHE_KEY_PV_PRODUCTION`,
     `CACHE_KEY_POWER_TO_USER` are imported from `.surplus_engine`
 
 ## Dev Notes
@@ -357,10 +310,30 @@ result = EvaluationResult(
 
 ### Agent Model Used
 
-Claude Sonnet 4.6 (via GitHub Copilot — SM agent, CS workflow)
+Claude Sonnet 4.6 (via GitHub Copilot — dev agent)
 
 ### Debug Log References
 
+_No blocking issues encountered._
+
 ### Completion Notes List
 
+- Upgraded `_sensor_cache` from `dict[str, float]` to `dict[str, tuple[float, object, bool]]` 3-tuple format.
+- `_handle_state_change` now handles `STATE_UNAVAILABLE`, `STATE_UNKNOWN`, and `ValueError` by storing `(last_val, utcnow(), False)` instead of silently ignoring.
+- Added `_check_cache_validity()` method: iterates required cache keys, returns `(False, reason)` on first missing/invalid entry, uses `_cache_key_to_entity` for human-readable reason strings.
+- Added `_write_result()` DRY helper used by both FAILSAFE and normal evaluation paths.
+- Wired validity check into `_evaluation_tick` before snapshot assembly: FAILSAFE path calls `hysteresis_filter.force_failsafe(reason)`, builds `EvaluationResult(charging_state="FAILSAFE")`, logs warn-once via `_failsafe_reason_logged`, and returns early.
+- Recovery path: when cache becomes valid after FAILSAFE, calls `hysteresis_filter.resume()` and logs INFO once.
+- Renamed `SurplusEngine._hysteresis` → `SurplusEngine.hysteresis_filter` (public) to enable direct access from sensor.
+- All AC1–AC7 validated by 65 passing tests (18 new Story 4.1 tests added, 47 prior tests updated/kept green).
+
 ### File List
+
+- `sensor.py` — cache tuple upgrade, `_handle_state_change` overhaul, `_check_cache_validity`, `_write_result`, `_evaluation_tick` FAILSAFE wiring
+- `surplus_engine.py` — renamed `_hysteresis` → `hysteresis_filter` (public attribute on `SurplusEngine`)
+- `tests/test_sensor.py` — 18 new Story 4.1 tests; 47 existing tests updated for new tuple cache format
+
+### Change Log
+
+- 2026-03-21: Story 4.1 implemented — sensor unavailability detection and fail-safe mode (all 7 ACs satisfied)
+- 2026-03-21: Code review — 1 patch finding fixed (AC3/AC4 reason string accuracy: added `_invalidation_reasons` dict to distinguish "= unavailable" / "= unknown" / ": non-numeric value"). 6 new tests added. 316/316 tests pass.

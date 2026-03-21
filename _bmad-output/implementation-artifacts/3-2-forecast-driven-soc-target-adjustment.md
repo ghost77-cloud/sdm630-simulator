@@ -1,6 +1,6 @@
 # Story 3.2: Forecast-Driven SOC Target Adjustment
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -100,64 +100,64 @@ Then the result is never below `SOC_HARD_FLOOR` (50)
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Implement `SurplusCalculator._apply_forecast_adjustment(snapshot, base_floor)` (AC: #1–#3, #6–#8)
-  - [ ] Return `(base_floor, "forecast_unavailable")` if `snapshot.forecast is None` or
+- [x] Task 1: Implement `SurplusCalculator._apply_forecast_adjustment(snapshot, base_floor)` (AC: #1–#3, #6–#8)
+  - [x] Return `(base_floor, "forecast_unavailable")` if `snapshot.forecast is None` or
     `not snapshot.forecast.forecast_available`
-  - [ ] Return `(base_floor, "forecast_good")` if `cloud_coverage_avg < 20` and `hour < 15`
+  - [x] Return `(base_floor, "forecast_good")` if `cloud_coverage_avg < 20` and `hour < 15`
     and solar remaining is not critically low
-  - [ ] If `solar_forecast_kwh_remaining is not None` and
+  - [x] If `solar_forecast_kwh_remaining is not None` and
     `solar_forecast_kwh_remaining < solar_remaining_threshold_kwh` and `hour >= 12`:
-    - [ ] Resolve seasonal target (same as cloud path)
-    - [ ] Return `(max(base_floor, seasonal_floor), "forecast_solar_low")`
-  - [ ] If `cloud_coverage_avg > 70` and `hour >= 13`:
-    - [ ] Resolve `seasonal_targets` from config (same pattern as `get_soc_floor` — merge
+    - [x] Resolve seasonal target (same as cloud path)
+    - [x] Return `(max(base_floor, seasonal_floor), "forecast_solar_low")`
+  - [x] If `cloud_coverage_avg > 70` and `hour >= 13`:
+    - [x] Resolve `seasonal_targets` from config (same pattern as `get_soc_floor` — merge
       DEFAULTS with config, month key lookup)
-    - [ ] `seasonal_floor = max(int(seasonal_targets.get(month, SOC_HARD_FLOOR)), SOC_HARD_FLOOR)`
-    - [ ] Return `(max(base_floor, seasonal_floor), "forecast_poor")`
-  - [ ] Default/neutral path: return `(base_floor, "forecast_neutral")`
+    - [x] `seasonal_floor = max(int(seasonal_targets.get(month, SOC_HARD_FLOOR)), SOC_HARD_FLOOR)`
+    - [x] Return `(max(base_floor, seasonal_floor), "forecast_poor")`
+  - [x] Default/neutral path: return `(base_floor, "forecast_neutral")`
 
-- [ ] Task 2: Add `solar_remaining_threshold_kwh` config key (AC: #8)
-  - [ ] Add `CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"` to
+- [x] Task 2: Add `solar_remaining_threshold_kwh` config key (AC: #8)
+  - [x] Add `CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"` to
     `__init__.py` config key constants
-  - [ ] Add `"solar_remaining_threshold_kwh": 2.0` to `DEFAULTS` dict (already done)
-  - [ ] Add `vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float)` to
+  - [x] Add `"solar_remaining_threshold_kwh": 2.0` to `DEFAULTS` dict (already done)
+  - [x] Add `vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float)` to
     `COMPONENT_SCHEMA`
-  - [ ] Add key to `_SCALAR_KEYS` set in `async_setup`
+  - [x] Add key to `_SCALAR_KEYS` set in `async_setup`
 
-- [ ] Task 3: Integrate forecast adjustment into `calculate_surplus` (AC: #1–#3, #6)
-  - [ ] Replace `soc_floor = self.get_soc_floor(snapshot)` with:
-    - [ ] `base_floor = self.get_soc_floor(snapshot)`
-    - [ ] `soc_floor, forecast_tag = self._apply_forecast_adjustment(snapshot, base_floor)`
-  - [ ] Use `soc_floor` (adjusted) for all buffer / headroom calculations (replacing `base_floor`)
-  - [ ] Update `result.soc_floor_active = soc_floor` (already correctly set in Story 2.2)
-  - [ ] Compose `reason` with forecast tag appended using `|` separator:
+- [x] Task 3: Integrate forecast adjustment into `calculate_surplus` (AC: #1–#3, #6)
+  - [x] Replace `soc_floor = self.get_soc_floor(snapshot)` with:
+    - [x] `base_floor = self.get_soc_floor(snapshot)`
+    - [x] `soc_floor, forecast_tag = self._apply_forecast_adjustment(snapshot, base_floor)`
+  - [x] Use `soc_floor` (adjusted) for all buffer / headroom calculations (replacing `base_floor`)
+  - [x] Update `result.soc_floor_active = soc_floor` (already correctly set in Story 2.2)
+  - [x] Compose `reason` with forecast tag appended using `|` separator:
     `f"wallbox_included_in_load|{forecast_tag}"` or `f"surplus_below_threshold|{forecast_tag}"`
-  - [ ] Set `result.forecast_available = snapshot.forecast.forecast_available if snapshot.forecast else False`
+  - [x] Set `result.forecast_available = snapshot.forecast.forecast_available if snapshot.forecast else False`
 
-- [ ] Task 3: Wire `ForecastConsumer.get_forecast(hass)` into `SurplusEngine._evaluation_tick` (AC: #4)
-  - [ ] In `_evaluation_tick`, add `forecast_data = await self._forecast_consumer.get_forecast(hass)` before snapshot assembly
-  - [ ] Pass `forecast=forecast_data` when constructing `SensorSnapshot`
-  - [ ] Ensure `self._forecast_consumer` is instantiated in `SurplusEngine.__init__` with access to `self._config`
-  - [ ] Guard: if no weather or forecast_solar entity configured, `get_forecast` already returns
+- [x] Task 3: Wire `ForecastConsumer.get_forecast(hass)` into `SurplusEngine._evaluation_tick` (AC: #4)
+  - [x] In `_evaluation_tick`, add `forecast_data = await self._forecast_consumer.get_forecast(hass)` before snapshot assembly
+  - [x] Pass `forecast=forecast_data` when constructing `SensorSnapshot`
+  - [x] Ensure `self._forecast_consumer` is instantiated in `SurplusEngine.__init__` with access to `self._config`
+  - [x] Guard: if no weather or forecast_solar entity configured, `get_forecast` already returns
     `ForecastData(forecast_available=False)` silently (Story 3.1 handles this — no extra guard needed here)
 
-- [ ] Task 4: Unit tests for forecast adjustment (AC: #5)
-  - [ ] Test AC1: `cloud_coverage_avg=10`, `hour=10` → floor unchanged, reason contains `"forecast_good"`
-  - [ ] Test AC2 (March): `cloud_coverage_avg=80`, `hour=14`, `month=3`, `seasonal_target=80` → floor ≥ 80,
+- [x] Task 4: Unit tests for forecast adjustment (AC: #5)
+  - [x] Test AC1: `cloud_coverage_avg=10`, `hour=10` → floor unchanged, reason contains `"forecast_good"`
+  - [x] Test AC2 (March): `cloud_coverage_avg=80`, `hour=14`, `month=3`, `seasonal_target=80` → floor ≥ 80,
     reason contains `"forecast_poor"`
-  - [ ] Test AC2 (December): `cloud_coverage_avg=90`, `hour=15`, `month=12`, `seasonal_target=100` → floor = 100
-  - [ ] Test AC3: `ForecastData(forecast_available=False)` → floor unchanged, `result.forecast_available=False`
-  - [ ] Test AC3 (None): `snapshot.forecast=None` → floor unchanged
-  - [ ] Test AC6: `cloud_coverage_avg=20`, `hour=10` → neutral path, floor unchanged
-  - [ ] Test AC6: `cloud_coverage_avg=70`, `hour=13` → neutral path, floor unchanged
-  - [ ] Test AC7: seasonal_target=30 (misconfigured, below SOC_HARD_FLOOR) → clamped to 50
-  - [ ] Test AC8: `solar_forecast_kwh_remaining=1.5`, `hour=14`, threshold=2.0 →
+  - [x] Test AC2 (December): `cloud_coverage_avg=90`, `hour=15`, `month=12`, `seasonal_target=100` → floor = 100
+  - [x] Test AC3: `ForecastData(forecast_available=False)` → floor unchanged, `result.forecast_available=False`
+  - [x] Test AC3 (None): `snapshot.forecast=None` → floor unchanged
+  - [x] Test AC6: `cloud_coverage_avg=20`, `hour=10` → neutral path, floor unchanged
+  - [x] Test AC6: `cloud_coverage_avg=70`, `hour=13` → neutral path, floor unchanged
+  - [x] Test AC7: seasonal_target=30 (misconfigured, below SOC_HARD_FLOOR) → clamped to 50
+  - [x] Test AC8: `solar_forecast_kwh_remaining=1.5`, `hour=14`, threshold=2.0 →
     floor raised, reason contains `"forecast_solar_low"`
-  - [ ] Test AC8 (above threshold): `solar_forecast_kwh_remaining=5.0`, `hour=14` →
+  - [x] Test AC8 (above threshold): `solar_forecast_kwh_remaining=5.0`, `hour=14` →
     neutral path, floor unchanged
-  - [ ] Test AC8 (None): `solar_forecast_kwh_remaining=None`, `cloud_coverage_avg=50` →
+  - [x] Test AC8 (None): `solar_forecast_kwh_remaining=None`, `cloud_coverage_avg=50` →
     neutral path (solar signal absent, cloud neutral)
-  - [ ] Test AC8 (before noon): `solar_forecast_kwh_remaining=0.5`, `hour=10` →
+  - [x] Test AC8 (before noon): `solar_forecast_kwh_remaining=0.5`, `hour=10` →
     not triggered (too early for afternoon protection)
 
 ## Dev Notes
@@ -505,4 +505,61 @@ def test_boundary_cloud_avg_exactly_70():
 
 ### Completion Notes List
 
-### File List
+## Dev Agent Record
+
+### Implementation Summary
+
+- Added `SurplusCalculator._resolve_seasonal_floor(snapshot)` — private helper that
+  merges DEFAULTS seasonal_targets with config overrides and clamps to SOC_HARD_FLOOR.
+- Added `SurplusCalculator._apply_forecast_adjustment(snapshot, base_floor) → tuple[int, str]`
+  — priority order: unavailable guard → solar_remaining primary signal → cloud_coverage
+  fallback → neutral. Sunny fast-path requires both cloud<20 AND healthy solar remaining.
+- Updated `calculate_surplus`: `soc_floor = get_soc_floor()` → `base_floor + _apply_forecast_adjustment();`
+  reason field now `"<base_reason>|<forecast_tag>"`.
+- `SurplusEngine.__init__` already had `self._forecast_consumer`; `evaluate_cycle` already
+  pre-fetches forecast via `get_forecast(hass)` — no changes needed to wiring.
+- `__init__.py` Task 2 was already complete (CONF_SOLAR_REMAINING_THRESHOLD_KWH, DEFAULTS,
+  COMPONENT_SCHEMA, _SCALAR_KEYS all present).
+
+### Tests Created
+
+`tests/test_surplus_calculator.py` — added `TestForecastAdjustment` class (18 new tests)
+covering AC1–AC3, AC6–AC8. Also fixed 2 pre-existing tests in `TestAC6WallboxIncludedInLoad`
+to use `startswith` matching (reason format changed to include `|forecast_tag`).
+
+### Decisions
+
+- AC6 "neutral path" for `cloud=20` at `hour<15`: since solar_remaining is None in those
+  tests (no solar entity), the sunny fast-path guard `solar_remaining is None or >= threshold`
+  is True, so cloud=20 (not < 20) correctly falls through to neutral — matches spec.
+- Forecast wired through `evaluate_cycle` (not added again to sensor.py `_evaluation_tick`)
+  — functionally equivalent and already present from Story 1.3.
+
+## File List
+
+- `surplus_engine.py` — MODIFIED: added `_resolve_seasonal_floor`, `_apply_forecast_adjustment`
+  (with NaN sanitisation), updated `calculate_surplus` (reason + base_floor/soc_floor split)
+- `tests/test_surplus_calculator.py` — MODIFIED: added `TestForecastAdjustment` (29 tests),
+  tightened 2 existing reason assertions in `TestAC6WallboxIncludedInLoad`
+
+## Code Review Record
+
+**Layers executed:** Blind Hunter, Edge Case Hunter, Acceptance Auditor
+
+**Triage:** 0 intent_gap, 0 bad_spec, 7 patch, 4 defer, 4 reject
+
+**Patches applied:**
+
+1. NaN guard added in `_apply_forecast_adjustment` — `math.isnan()` for cloud_avg and solar_remaining
+2. Reason assertions tightened from `startswith()` to exact string match
+3. AC3 caplog test: asserts no WARNING logged on forecast-unavailable path
+4. Boundary tests added: hour=12 solar, hour=15 sunny, hour=12 cloud, solar=threshold
+5. Cross-path test: cloud<20 + solar_remaining low + hour 13 → forecast_solar_low
+6. Custom `solar_remaining_threshold_kwh` config override test
+7. AC2 March assertion tightened from `>= 80` to `== 80`
+
+**Deferred findings (pre-existing, not this story):**
+- String-key risk in seasonal_targets dict (schema coerces in HA, tests use int)
+- Conditional import per-call in `_resolve_seasonal_floor` (same pattern as `get_soc_floor`)
+- `solar_remaining_threshold_kwh <= 0` config validation (separate concern)
+- Duplicate seasonal resolution across methods (refactoring out of scope per spec)

@@ -20,10 +20,12 @@ from . import CONF_ENTITIES
 from .surplus_engine import (
     SurplusEngine,
     SensorSnapshot,
+    EvaluationResult,
     CACHE_KEY_SOC,
     CACHE_KEY_POWER_TO_GRID,
     CACHE_KEY_PV_PRODUCTION,
     CACHE_KEY_POWER_TO_USER,
+    SOC_HARD_FLOOR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,10 +80,13 @@ class SDM630SimSensor(SensorEntity):
         self._attr_should_poll = False
         self.hass = hass
         self._config = config
-        self._sensor_cache: dict = {}
+        self._sensor_cache: dict[str, tuple[float, object, bool]] = {}
         self._engine: SurplusEngine | None = None
         self._first_tick: bool = True
         self._entity_to_cache_key: dict[str, str] = {}
+        self._cache_key_to_entity: dict[str, str] = {}
+        self._failsafe_reason_logged: str | None = None
+        self._invalidation_reasons: dict[str, str] = {}
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
@@ -94,6 +99,9 @@ class SDM630SimSensor(SensorEntity):
             entity_id: ENTITY_ROLE_TO_CACHE_KEY[role]
             for role, entity_id in entities_cfg.items()
             if role in ENTITY_ROLE_TO_CACHE_KEY
+        }
+        self._cache_key_to_entity: dict[str, str] = {
+            v: k for k, v in self._entity_to_cache_key.items()
         }
         numeric_entity_ids = list(self._entity_to_cache_key.keys())
 
@@ -115,16 +123,28 @@ class SDM630SimSensor(SensorEntity):
         new_state = event.data.get("new_state")
         if new_state is None:
             return
-        if new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-            return
         entity_id = new_state.entity_id
         cache_key = self._entity_to_cache_key.get(entity_id)
         if cache_key is None:
             return
+        if new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            last_val = self._sensor_cache.get(cache_key, (0.0, None, True))[0]
+            self._sensor_cache[cache_key] = (last_val, dt_util.utcnow(), False)
+            self._invalidation_reasons[cache_key] = f" = {new_state.state}"
+            return
         try:
-            self._sensor_cache[cache_key] = float(new_state.state)
-        except (ValueError, TypeError) as exc:
-            _LOGGER.debug("Cannot parse state for %s: %s", entity_id, exc)
+            self._sensor_cache[cache_key] = (
+                float(new_state.state), new_state.last_changed, True
+            )
+            self._invalidation_reasons.pop(cache_key, None)
+        except (ValueError, TypeError):
+            last_val = self._sensor_cache.get(cache_key, (0.0, None, True))[0]
+            self._sensor_cache[cache_key] = (last_val, dt_util.utcnow(), False)
+            self._invalidation_reasons[cache_key] = ": non-numeric value"
+            _LOGGER.debug(
+                "Cache invalidated for %s: non-numeric value '%s'",
+                entity_id, new_state.state,
+            )
 
     async def _evaluation_tick(self, now) -> None:
         """Called by async_track_time_interval at each evaluation cycle."""
@@ -136,6 +156,41 @@ class SDM630SimSensor(SensorEntity):
                 len(entities),
             )
             self._first_tick = False
+
+        # Story 4.1: sensor-unavailability fail-safe guard
+        cache_valid, reason = self._check_cache_validity()
+        if not cache_valid:
+            self._engine.hysteresis_filter.force_failsafe(reason)
+            result = EvaluationResult(
+                reported_kw=0.0,
+                real_surplus_kw=0.0,
+                buffer_used_kw=0.0,
+                soc_percent=self._sensor_cache.get(CACHE_KEY_SOC, (0.0,))[0],
+                soc_floor_active=SOC_HARD_FLOOR,
+                charging_state="FAILSAFE",
+                reason=reason,
+                forecast_available=False,
+            )
+            _LOGGER.debug(
+                "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
+                "state=%s reported=%.2fkW reason=%s forecast=%s",
+                result.real_surplus_kw, result.buffer_used_kw, result.soc_percent,
+                result.soc_floor_active, result.charging_state, result.reported_kw,
+                result.reason, result.forecast_available,
+            )
+            if self._failsafe_reason_logged != reason:
+                _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", reason)
+                self._failsafe_reason_logged = reason
+            else:
+                _LOGGER.debug("SDM630 FAIL-SAFE (ongoing): %s", reason)
+            self._write_result(result)
+            return
+
+        # Recovery: all sensors healthy again after a FAILSAFE period
+        if self._failsafe_reason_logged is not None:
+            self._engine.hysteresis_filter.resume()
+            _LOGGER.info("SDM630 recovered from FAILSAFE. Resuming normal evaluation.")
+            self._failsafe_reason_logged = None
 
         sunset_time = None
         sunrise_time = None
@@ -151,10 +206,10 @@ class SDM630SimSensor(SensorEntity):
             _LOGGER.debug("sun.sun unavailable — solar boundary times set to None")
 
         snapshot = SensorSnapshot(
-            soc_percent     = self._sensor_cache.get(CACHE_KEY_SOC, 0.0),
-            power_to_grid_w = self._sensor_cache.get(CACHE_KEY_POWER_TO_GRID, 0.0),
-            pv_production_w = self._sensor_cache.get(CACHE_KEY_PV_PRODUCTION, 0.0),
-            power_to_user_w = self._sensor_cache.get(CACHE_KEY_POWER_TO_USER, 0.0),
+            soc_percent     = self._sensor_cache.get(CACHE_KEY_SOC, (0.0, None, False))[0],
+            power_to_grid_w = self._sensor_cache.get(CACHE_KEY_POWER_TO_GRID, (0.0, None, False))[0],
+            pv_production_w = self._sensor_cache.get(CACHE_KEY_PV_PRODUCTION, (0.0, None, False))[0],
+            power_to_user_w = self._sensor_cache.get(CACHE_KEY_POWER_TO_USER, (0.0, None, False))[0],
             timestamp       = now,
             sunset_time     = sunset_time,
             sunrise_time    = sunrise_time,
@@ -173,6 +228,28 @@ class SDM630SimSensor(SensorEntity):
         if result.charging_state == "FAILSAFE":
             _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", result.reason)
 
+        self._write_result(result)
+
+    def _check_cache_validity(self) -> tuple[bool, str]:
+        """Return (is_valid, reason). FAILSAFE reason set if any required entry is missing or invalid."""
+        required_keys = [
+            CACHE_KEY_SOC,
+            CACHE_KEY_POWER_TO_GRID,
+            CACHE_KEY_PV_PRODUCTION,
+            CACHE_KEY_POWER_TO_USER,
+        ]
+        for cache_key in required_keys:
+            entry = self._sensor_cache.get(cache_key)
+            entity_id = self._cache_key_to_entity.get(cache_key, cache_key)
+            if entry is None:
+                return False, f"{entity_id}: no data received"
+            if not entry[2]:
+                reason_detail = self._invalidation_reasons.get(cache_key, " = unavailable")
+                return False, f"{entity_id}{reason_detail}"
+        return True, ""
+
+    def _write_result(self, result: EvaluationResult) -> None:
+        """Write evaluation result to Modbus register and HA state."""
         input_data_block.set_float(TOTAL_POWER, result.reported_kw)
         self._attr_native_value = result.reported_kw
         self.async_write_ha_state()

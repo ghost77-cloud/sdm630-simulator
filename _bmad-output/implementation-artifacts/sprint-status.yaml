@@ -60,12 +60,12 @@ development_status:
   # Epic 3: Forecast Integration — Weather and Solar Forecast Consumption
   epic-3: in-progress
   3-1-forecast-data-fetching-and-parsing: done
-  3-2-forecast-driven-soc-target-adjustment: ready-for-dev
+  3-2-forecast-driven-soc-target-adjustment: done
   epic-3-retrospective: optional
 
   # Epic 4: Fail-Safe and Reliability — Sensor Monitoring and Fault Handling
   epic-4: in-progress
-  4-1-sensor-unavailability-detection-and-fail-safe: ready-for-dev
+  4-1-sensor-unavailability-detection-and-fail-safe: done
   4-2-staleness-detection: ready-for-dev
   4-3-hard-soc-floor-enforcement: ready-for-dev
   4-4-sensor-value-range-validation: ready-for-dev

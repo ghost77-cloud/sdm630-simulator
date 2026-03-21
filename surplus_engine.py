@@ -133,9 +133,75 @@ class SurplusCalculator:
             _LOGGER.warning("SDM630: Cannot parse time token '%s'", token)
             return None
 
+    def _resolve_seasonal_floor(self, snapshot: SensorSnapshot) -> int:
+        """Resolve the seasonal SOC target for the current month.
+
+        Extracted as a helper because both the solar-remaining and
+        cloud-coverage paths need the same seasonal-target resolution.
+        """
+        if __package__:
+            from . import DEFAULTS as _DEFAULTS
+        else:
+            _DEFAULTS = {}
+        default_seasonal = _DEFAULTS.get("seasonal_targets", {})
+        seasonal_targets = {
+            **default_seasonal,
+            **self.config.get("seasonal_targets", {}),
+        }
+        month = snapshot.timestamp.month
+        seasonal_floor = int(seasonal_targets.get(month, SOC_HARD_FLOOR))
+        return max(seasonal_floor, SOC_HARD_FLOOR)
+
+    def _apply_forecast_adjustment(
+        self, snapshot: SensorSnapshot, base_floor: int
+    ) -> tuple[int, str]:
+        """Return (adjusted_soc_floor, forecast_reason_tag).
+
+        Raises the SOC floor to the seasonal target when forecast signals
+        poor PV production for the remainder of the day.
+        Uses solar_forecast_kwh_remaining (from forecast_solar) as the
+        primary signal; falls back to cloud_coverage_avg (from weather).
+        Never returns a floor below SOC_HARD_FLOOR.
+        """
+        if snapshot.forecast is None or not snapshot.forecast.forecast_available:
+            return base_floor, "forecast_unavailable"
+
+        cloud_avg = snapshot.forecast.cloud_coverage_avg
+        solar_remaining = snapshot.forecast.solar_forecast_kwh_remaining
+        hour = snapshot.timestamp.hour
+        threshold_kwh = self.config.get("solar_remaining_threshold_kwh", 2.0)
+
+        # Sanitise NaN — treat as unknown (cloud→neutral 50, solar→None)
+        if math.isnan(cloud_avg):
+            cloud_avg = 50.0
+        if solar_remaining is not None and math.isnan(solar_remaining):
+            solar_remaining = None
+
+        # Sunny fast-path: only if solar remaining is also healthy (or unknown)
+        if cloud_avg < 20 and hour < 15:
+            if solar_remaining is None or solar_remaining >= threshold_kwh:
+                return base_floor, "forecast_good"
+
+        # Primary signal: solar forecast remaining is critically low
+        if (
+            solar_remaining is not None
+            and solar_remaining < threshold_kwh
+            and hour >= 12
+        ):
+            seasonal_floor = self._resolve_seasonal_floor(snapshot)
+            return max(base_floor, seasonal_floor), "forecast_solar_low"
+
+        # Fallback signal: high cloud coverage from weather service
+        if cloud_avg > 70 and hour >= 13:
+            seasonal_floor = self._resolve_seasonal_floor(snapshot)
+            return max(base_floor, seasonal_floor), "forecast_poor"
+
+        return base_floor, "forecast_neutral"
+
     def calculate_surplus(self, snapshot: SensorSnapshot) -> EvaluationResult:
         """Calculate net surplus adjusted for battery buffer. (Story 2.2)"""
-        soc_floor = self.get_soc_floor(snapshot)
+        base_floor = self.get_soc_floor(snapshot)
+        soc_floor, forecast_tag = self._apply_forecast_adjustment(snapshot, base_floor)
 
         real_surplus_kw = (snapshot.pv_production_w - snapshot.power_to_user_w) / 1000.0
 
@@ -157,12 +223,13 @@ class SurplusCalculator:
         )
 
         if augmented_kw >= wallbox_threshold_kw:
+            reason = f"wallbox_included_in_load|{forecast_tag}"
             _LOGGER.debug(
                 "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
                 "state=%s reported=%.2fkW reason=%s forecast=%s",
                 real_surplus_kw, buffer_used_kw, snapshot.soc_percent,
                 soc_floor, "ACTIVE", augmented_kw,
-                "wallbox_included_in_load", forecast_available,
+                reason, forecast_available,
             )
             return EvaluationResult(
                 reported_kw       = augmented_kw,
@@ -171,16 +238,17 @@ class SurplusCalculator:
                 soc_percent       = snapshot.soc_percent,
                 soc_floor_active  = soc_floor,
                 charging_state    = "ACTIVE",
-                reason            = "wallbox_included_in_load",
+                reason            = reason,
                 forecast_available = forecast_available,
             )
 
+        reason = f"surplus_below_threshold|{forecast_tag}"
         _LOGGER.debug(
             "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
             "state=%s reported=%.2fkW reason=%s forecast=%s",
             real_surplus_kw, 0.0, snapshot.soc_percent,
             soc_floor, "INACTIVE", 0.0,
-            "surplus_below_threshold", forecast_available,
+            reason, forecast_available,
         )
         return EvaluationResult(
             reported_kw       = 0.0,
@@ -189,7 +257,7 @@ class SurplusCalculator:
             soc_percent       = snapshot.soc_percent,
             soc_floor_active  = soc_floor,
             charging_state    = "INACTIVE",
-            reason            = "surplus_below_threshold",
+            reason            = reason,
             forecast_available = forecast_available,
         )
 
@@ -324,7 +392,7 @@ class SurplusEngine:
     def __init__(self, config: dict) -> None:
         self.config = config
         self._calculator = SurplusCalculator(config)
-        self._hysteresis = HysteresisFilter(config)
+        self.hysteresis_filter = HysteresisFilter(config)
         self._forecast_consumer = ForecastConsumer(config)
 
     async def evaluate_cycle(
@@ -339,10 +407,10 @@ class SurplusEngine:
         calc = self._calculator.calculate_surplus(snapshot)
 
         # 2. Apply hysteresis filter (Story 2.3)
-        final_kw = self._hysteresis.update(calc.reported_kw, snapshot.timestamp)
+        final_kw = self.hysteresis_filter.update(calc.reported_kw, snapshot.timestamp)
 
         # 3. Determine reason and charging state
-        charging_state = self._hysteresis.state
+        charging_state = self.hysteresis_filter.state
         if charging_state == "FAILSAFE":
             reason = "failsafe_active"
             final_kw = 0.0
