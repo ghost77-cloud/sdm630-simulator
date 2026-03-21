@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-03-21T00:00:00"
-last_updated: "2026-03-21T11:29:00"
+last_updated: "2026-03-21T11:44:00"
 project: sdm630-simulator
 project_key: NOKEY
 tracking_system: file-system
@@ -46,7 +46,7 @@ development_status:
   epic-1: in-progress
   1-1-yaml-configuration-schema-and-parsing: ready-for-dev
   1-2-surplus-engine-py-module-scaffold-with-dataclasses: ready-for-dev
-  1-3-integration-wiring-in-sensor-py-and-evaluation-loop: backlog
+  1-3-integration-wiring-in-sensor-py-and-evaluation-loop: ready-for-dev
   1-4-structured-decision-logging: backlog
   epic-1-retrospective: optional
 
