@@ -1,6 +1,6 @@
 # Story 1.2: `surplus_engine.py` Module Scaffold with Dataclasses
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -60,36 +60,36 @@ in subsequent stories — and importable without errors in plain Python tests.
 
 ## Tasks / Subtasks
 
-- [ ] Create `surplus_engine.py` in component directory (AC: #1, #6)
-  - [ ] Add module docstring and `if __package__:` guard at top
-  - [ ] Add `_LOGGER` and `SOC_HARD_FLOOR = 50` module-level constants
-- [ ] Define `ForecastData` dataclass (AC: #4)
-  - [ ] `forecast_available: bool = False`
-  - [ ] `cloud_coverage_avg: float = 50.0`
-  - [ ] `solar_forecast_kwh_today: float | None = None`
-- [ ] Define `SensorSnapshot` dataclass (AC: #5)
-  - [ ] All required fields with correct types
-  - [ ] `forecast: ForecastData | None = None` as last field with default
-- [ ] Define `EvaluationResult` dataclass (AC: #3)
-  - [ ] All 8 fields with exact types matching AC
-- [ ] Define `SurplusCalculator` class — stdlib only (AC: #2)
-  - [ ] Imports: `datetime`, `math`, `dataclasses` only — NO HA imports
-  - [ ] `__init__(self, config: dict) -> None: pass` — stores config for Epic 2 access
-  - [ ] `get_soc_floor(self, snapshot: SensorSnapshot) -> int: raise NotImplementedError`
-  - [ ] `calculate_surplus(self, snapshot: SensorSnapshot) -> EvaluationResult: raise NotImplementedError`
-- [ ] Define `HysteresisFilter` class skeleton (AC: #7)
-  - [ ] `__init__(self, hold_time_minutes: int) -> None: pass`
-  - [ ] `update(self, reported_kw: float, now: datetime) -> float: raise NotImplementedError`
-  - [ ] `force_failsafe(self, reason: str) -> None: raise NotImplementedError`
-  - [ ] `resume(self) -> None: raise NotImplementedError`
-- [ ] Define `ForecastConsumer` class skeleton (AC: #7)
-  - [ ] `__init__(self, config: dict) -> None: pass`
-  - [ ] `async def get_forecast(self, hass) -> ForecastData: raise NotImplementedError`
-- [ ] Define `SurplusEngine` orchestrator class (AC: #1, #7)
-  - [ ] `__init__(self, config: dict) -> None` → store `self.config = config` (not just `pass`)
-  - [ ] `async def evaluate_cycle(self, snapshot: SensorSnapshot) -> EvaluationResult` → returns default
+- [x] Create `surplus_engine.py` in component directory (AC: #1, #6)
+  - [x] Add module docstring and `if __package__:` guard at top
+  - [x] Add `_LOGGER` and `SOC_HARD_FLOOR = 50` module-level constants
+- [x] Define `ForecastData` dataclass (AC: #4)
+  - [x] `forecast_available: bool = False`
+  - [x] `cloud_coverage_avg: float = 50.0`
+  - [x] `solar_forecast_kwh_today: float | None = None`
+- [x] Define `SensorSnapshot` dataclass (AC: #5)
+  - [x] All required fields with correct types
+  - [x] `forecast: ForecastData | None = None` as last field with default
+- [x] Define `EvaluationResult` dataclass (AC: #3)
+  - [x] All 8 fields with exact types matching AC
+- [x] Define `SurplusCalculator` class — stdlib only (AC: #2)
+  - [x] Imports: `datetime`, `math`, `dataclasses` only — NO HA imports
+  - [x] `__init__(self, config: dict) -> None: pass` — stores config for Epic 2 access
+  - [x] `get_soc_floor(self, snapshot: SensorSnapshot) -> int: raise NotImplementedError`
+  - [x] `calculate_surplus(self, snapshot: SensorSnapshot) -> EvaluationResult: raise NotImplementedError`
+- [x] Define `HysteresisFilter` class skeleton (AC: #7)
+  - [x] `__init__(self, hold_time_minutes: int) -> None: pass`
+  - [x] `update(self, reported_kw: float, now: datetime) -> float: raise NotImplementedError`
+  - [x] `force_failsafe(self, reason: str) -> None: raise NotImplementedError`
+  - [x] `resume(self) -> None: raise NotImplementedError`
+- [x] Define `ForecastConsumer` class skeleton (AC: #7)
+  - [x] `__init__(self, config: dict) -> None: pass`
+  - [x] `async def get_forecast(self, hass) -> ForecastData: raise NotImplementedError`
+- [x] Define `SurplusEngine` orchestrator class (AC: #1, #7)
+  - [x] `__init__(self, config: dict) -> None` → store `self.config = config` (not just `pass`)
+  - [x] `async def evaluate_cycle(self, snapshot: SensorSnapshot) -> EvaluationResult` → returns default
     `EvaluationResult` (NOT raise) — **must be `async def`** to avoid signature regression in Story 3
-- [ ] Verify module imports cleanly in plain Python (no HA runtime) (AC: #1)
+- [x] Verify module imports cleanly in plain Python (no HA runtime) (AC: #1)
 
 ## Dev Notes
 
@@ -340,10 +340,28 @@ custom_components/sdm630_simulator/
 
 ### Agent Model Used
 
-_to be filled by dev agent_
+Claude Sonnet 4.6 (GitHub Copilot)
 
 ### Debug Log References
 
+- `from __future__ import annotations` causes PEP 563 stringified annotations;
+  tests must use `typing.get_type_hints()` instead of `__annotations__` directly
+- `asyncio.get_event_loop().run_until_complete()` deprecated in Python 3.13 — replaced with `asyncio.run()`
+
 ### Completion Notes List
 
+- Created `surplus_engine.py` in repo root (same location as `sensor.py`, `__init__.py`)
+- All 7 required top-level names exported; module loads cleanly without HA runtime
+- `SurplusCalculator` has zero HA imports (verified by source-inspection test)
+- `EvaluationResult` has exactly 8 fields, all required (no defaults) — confirmed via test
+- `ForecastData` instantiates with `ForecastData()` using all defaults
+- `SensorSnapshot.forecast` has `None` default; all other fields are required
+- `_LOGGER`, `SOC_HARD_FLOOR = 50`, and `if __package__:` guard all present
+- `SurplusEngine.evaluate_cycle` is `async def` and returns a safe default `EvaluationResult`
+- 63 new unit tests written in `tests/test_surplus_engine.py`; all passing
+- Full regression suite: 116 passed (63 new + 53 from Story 1.1)
+
 ### File List
+
+- `surplus_engine.py` — created (all story tasks)
+- `tests/test_surplus_engine.py` — created (63 unit tests, all ACs covered)
