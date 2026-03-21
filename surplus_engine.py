@@ -135,7 +135,63 @@ class SurplusCalculator:
 
     def calculate_surplus(self, snapshot: SensorSnapshot) -> EvaluationResult:
         """Calculate net surplus adjusted for battery buffer. (Story 2.2)"""
-        raise NotImplementedError
+        soc_floor = self.get_soc_floor(snapshot)
+
+        real_surplus_kw = (snapshot.pv_production_w - snapshot.power_to_user_w) / 1000.0
+
+        battery_capacity_kwh = self.config.get("battery_capacity_kwh", 10.0)
+        max_discharge_kw     = self.config.get("max_discharge_kw", 10.0)
+        hold_time_minutes    = max(self.config.get("hold_time_minutes", 10), 1)  # guard /0
+        wallbox_threshold_kw = self.config.get("wallbox_threshold_kw", 4.2)
+
+        soc_headroom      = max(0.0, snapshot.soc_percent - soc_floor)
+        buffer_energy_kwh = soc_headroom * battery_capacity_kwh / 100.0
+        buffer_kw_max     = min(max_discharge_kw,
+                                buffer_energy_kwh / (hold_time_minutes / 60.0))
+        buffer_used_kw    = min(buffer_kw_max,
+                                max(0.0, wallbox_threshold_kw - real_surplus_kw))
+        augmented_kw      = real_surplus_kw + buffer_used_kw
+
+        forecast_available = (
+            snapshot.forecast.forecast_available if snapshot.forecast else False
+        )
+
+        if augmented_kw >= wallbox_threshold_kw:
+            _LOGGER.debug(
+                "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
+                "state=%s reported=%.2fkW reason=%s forecast=%s",
+                real_surplus_kw, buffer_used_kw, snapshot.soc_percent,
+                soc_floor, "ACTIVE", augmented_kw,
+                "wallbox_included_in_load", forecast_available,
+            )
+            return EvaluationResult(
+                reported_kw       = augmented_kw,
+                real_surplus_kw   = real_surplus_kw,
+                buffer_used_kw    = buffer_used_kw,
+                soc_percent       = snapshot.soc_percent,
+                soc_floor_active  = soc_floor,
+                charging_state    = "ACTIVE",
+                reason            = "wallbox_included_in_load",
+                forecast_available = forecast_available,
+            )
+
+        _LOGGER.debug(
+            "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
+            "state=%s reported=%.2fkW reason=%s forecast=%s",
+            real_surplus_kw, 0.0, snapshot.soc_percent,
+            soc_floor, "INACTIVE", 0.0,
+            "surplus_below_threshold", forecast_available,
+        )
+        return EvaluationResult(
+            reported_kw       = 0.0,
+            real_surplus_kw   = real_surplus_kw,
+            buffer_used_kw    = 0.0,
+            soc_percent       = snapshot.soc_percent,
+            soc_floor_active  = soc_floor,
+            charging_state    = "INACTIVE",
+            reason            = "surplus_below_threshold",
+            forecast_available = forecast_available,
+        )
 
 
 # ---------------------------------------------------------------------------

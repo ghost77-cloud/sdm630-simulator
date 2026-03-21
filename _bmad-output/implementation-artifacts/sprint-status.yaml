@@ -53,7 +53,7 @@ development_status:
   # Epic 2: Core Surplus Logic — SOC Strategy, Buffer Math, and Hysteresis
   epic-2: in-progress
   2-1-soc-floor-determination-via-time-window-strategy: done
-  2-2-surplus-calculation-with-battery-buffer: ready-for-dev
+  2-2-surplus-calculation-with-battery-buffer: done
   2-3-hysteresis-filter-state-machine: ready-for-dev
   epic-2-retrospective: optional
 

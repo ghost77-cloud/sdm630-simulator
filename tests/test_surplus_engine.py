@@ -315,10 +315,11 @@ class TestSkeletonNotImplemented:
         assert isinstance(result, int)
         assert result >= se.SOC_HARD_FLOOR
 
-    def test_surplus_calculator_calculate_surplus_raises(self, se, snapshot):
+    def test_surplus_calculator_calculate_surplus_returns_result(self, se, snapshot):
+        """calculate_surplus is implemented in Story 2.2 — returns EvaluationResult."""
         calc = se.SurplusCalculator(config={})
-        with pytest.raises(NotImplementedError):
-            calc.calculate_surplus(snapshot)
+        result = calc.calculate_surplus(snapshot)
+        assert isinstance(result, se.EvaluationResult)
 
     def test_hysteresis_filter_update_raises(self, se, now):
         hf = se.HysteresisFilter(hold_time_minutes=10)
