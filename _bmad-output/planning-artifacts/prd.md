@@ -222,7 +222,7 @@ This is a software-only IoT component that communicates with physical hardware (
 |-----------|------|-----------|----------|
 | Growatt SPH10000TL3-BH-UP | Hybrid inverter with 10 kWh battery | Modbus RTU via Growatt Local HA integration | Yes |
 | Growatt THOR 11AS-P-V1 | Wallbox, reads SDM630 meter | Modbus TCP (reads from simulator on port 5020) | Yes |
-| Home Assistant host | Runs simulator component | Python 3.9+, pymodbus ≥ 3.9.2 | Yes |
+| Home Assistant host | Runs simulator component | Python 3.12+, pymodbus ≥ 3.11.1 | Yes |
 | Network | LAN connectivity between HA host and wallbox | TCP/IP, port 5020 | Yes |
 
 No additional hardware is required. The simulator is a pure software component.
@@ -406,7 +406,7 @@ For the *energy system* being managed:
 
 ### Integration
 
-- **NFR9:** The system must be compatible with pymodbus ≥ 3.9.2
+- **NFR9:** The system must be compatible with pymodbus ≥ 3.11.1
 - **NFR10:** The system must work with Home Assistant 2024.x and later
 - **NFR11:** The system must function with any weather integration that supports the `weather.get_forecasts` service call with `cloud_coverage` data
 - **NFR12:** The system must function with the Forecast.Solar integration for PV production estimates
