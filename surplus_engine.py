@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import logging
 import math  # noqa: F401 – available for Story 2 logic
+import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 if __package__:
-    pass  # HA-specific imports will be added in Story 1.3 onward
+    from . import DEFAULTS  # access to defaults dict
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class ForecastData:
 
     forecast_available: bool = False
     cloud_coverage_avg: float = 50.0
-    solar_forecast_kwh_today: float | None = None
+    solar_forecast_kwh_remaining: float | None = None
 
 
 @dataclass
@@ -79,7 +80,58 @@ class SurplusCalculator:
 
     def get_soc_floor(self, snapshot: SensorSnapshot) -> int:
         """Return current SOC floor based on time-window strategy. (Story 2.1)"""
-        raise NotImplementedError
+        if __package__:
+            from . import DEFAULTS as _DEFAULTS
+        else:
+            _DEFAULTS = {}  # unit tests supply full config directly
+
+        time_strategy = self.config.get("time_strategy", _DEFAULTS.get("time_strategy", []))
+        default_seasonal = _DEFAULTS.get("seasonal_targets", {})
+        seasonal_targets = {**default_seasonal, **self.config.get("seasonal_targets", {})}
+        month = snapshot.timestamp.month
+
+        for rule in time_strategy:
+            if "before" in rule:
+                boundary = self._resolve_time_token(rule["before"], snapshot)
+                if boundary is None:
+                    continue  # token unresolvable — skip, try next rule
+                if snapshot.timestamp < boundary:
+                    floor = max(int(rule["soc_floor"]), SOC_HARD_FLOOR)
+                    return floor
+            elif rule.get("default"):
+                floor = int(seasonal_targets.get(month, SOC_HARD_FLOOR))
+                if floor < SOC_HARD_FLOOR:
+                    _LOGGER.warning(
+                        "Configured seasonal_target month=%d value=%d below "
+                        "SOC_HARD_FLOOR. Clamping.",
+                        month, floor,
+                    )
+                    floor = SOC_HARD_FLOOR
+                return floor
+
+        # Defensive fallback — should not occur with well-formed config
+        return SOC_HARD_FLOOR
+
+    def _resolve_time_token(
+        self, token: str, snapshot: SensorSnapshot
+    ) -> datetime | None:
+        """Parse time tokens like 'sunrise+2h', 'sunset-3h', or 'HH:MM'."""
+        m = re.match(r"^(sunrise|sunset)([+-])(\d+(?:\.\d+)?)h$", token)
+        if m:
+            base_name, sign, hours = m.group(1), m.group(2), float(m.group(3))
+            base = snapshot.sunrise_time if base_name == "sunrise" else snapshot.sunset_time
+            if base is None:
+                return None
+            delta = timedelta(hours=hours)
+            return base + delta if sign == "+" else base - delta
+        # Plain "HH:MM" static time
+        try:
+            t = datetime.strptime(token, "%H:%M").time()
+            ts = snapshot.timestamp
+            return ts.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+        except ValueError:
+            _LOGGER.warning("SDM630: Cannot parse time token '%s'", token)
+            return None
 
     def calculate_surplus(self, snapshot: SensorSnapshot) -> EvaluationResult:
         """Calculate net surplus adjusted for battery buffer. (Story 2.2)"""

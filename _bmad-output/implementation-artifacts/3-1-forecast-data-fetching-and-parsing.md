@@ -27,10 +27,14 @@ And `result.forecast_available` is set to `True`
 
 **AC2 — Solar forecast entity state read**
 
-Given `forecast_solar:` entity is configured and its HA state is a numeric string\
+Given `forecast_solar:` entity is configured (pointing to the
+`sensor.energy_production_today_remaining` sensor from the `forecast_solar`
+integration) and its HA state is a numeric string\
 When `get_forecast(hass)` is awaited\
 Then `hass.states.get(config_entities["forecast_solar"]).state` is read\
-And `float(state)` is stored as `result.solar_forecast_kwh_today`\
+And `float(state)` is stored as `result.solar_forecast_kwh_remaining` (kWh
+remaining for the rest of the day — more actionable for afternoon SOC
+decisions than the total daily production)\
 And `forecast_available` remains `True` if weather fetch also succeeded
 
 **AC3 — Error/unavailable handled gracefully**
@@ -40,7 +44,7 @@ exception, the response dict is malformed, or `float()` conversion fails\
 When `get_forecast(hass)` is awaited\
 Then the exception is caught — **not propagated**\
 And the method returns `ForecastData(forecast_available=False,`
-`cloud_coverage_avg=50.0, solar_forecast_kwh_today=None)` (conservative defaults)\
+`cloud_coverage_avg=50.0, solar_forecast_kwh_remaining=None)` (conservative defaults)\
 And `_LOGGER.warning("Forecast unavailable: %s. Using conservative defaults.", reason)`
 is emitted once
 
@@ -55,7 +59,7 @@ And **no** WARNING is logged — this is the expected degraded mode
 
 Given only `forecast_solar:` is configured (no `weather:` entity)\
 When `get_forecast(hass)` is awaited\
-Then `solar_forecast_kwh_today` is populated from the entity state\
+Then `solar_forecast_kwh_remaining` is populated from the entity state\
 And `cloud_coverage_avg` retains the neutral default (50.0)\
 And `forecast_available` is set to `True` (partial data is still useful)
 
@@ -83,10 +87,10 @@ in `SurplusCalculator` — HA-free purity is preserved)
   - [ ] Set `forecast_available = True`
   - [ ] Check `solar_entity = entities.get("forecast_solar")` — if not `None`, read
         `hass.states.get(solar_entity)` and parse `float(state.state)` into
-        `solar_forecast_kwh_today`; wrap this sub-call in its own try/except
+        `solar_forecast_kwh_remaining`; wrap this sub-call in its own try/except
         (solar failure should not block weather result — AC: #5)
   - [ ] Return `ForecastData(forecast_available=True, cloud_coverage_avg=cloud_coverage_avg,`
-        `solar_forecast_kwh_today=solar_forecast_kwh_today)`
+        `solar_forecast_kwh_remaining=solar_forecast_kwh_remaining)`
   - [ ] In except block: log WARNING with `str(exc)` as `reason`; return `ForecastData()` (AC: #3)
 
 - [ ] Task 2: Wire `get_forecast` call into `SurplusEngine._evaluation_tick` in `surplus_engine.py` (AC: #6)
@@ -99,8 +103,9 @@ in `SurplusCalculator` — HA-free purity is preserved)
         into `SurplusCalculator.calculate_surplus(snapshot)` — no other change needed there
 
 - [ ] Task 3: Verify `ForecastConsumer.__init__` stores `self._config = config` (already in Story 1.2 scaffold)
-  - [ ] Confirm no new dataclass fields need to be added to `ForecastData` (all three fields were
-        defined in Story 1.2 — no changes to dataclass)
+  - [ ] Confirm `ForecastData` field is named `solar_forecast_kwh_remaining`
+        (renamed from `solar_forecast_kwh_today` — matches the
+        `sensor.energy_production_today_remaining` entity from `forecast_solar`)
 
 - [ ] Task 4: Manual smoke-test confirmation (no formal test infra for HA service calls)
   - [ ] Confirm no regression in evaluation loop by enabling verbose logging and checking
@@ -152,20 +157,20 @@ async def get_forecast(self, hass) -> ForecastData:
         ]
         cloud_coverage_avg = sum(cloud_values) / len(cloud_values) if cloud_values else 50.0
 
-        solar_forecast_kwh_today: float | None = None
+        solar_forecast_kwh_remaining: float | None = None
         solar_entity = entities.get("forecast_solar")
         if solar_entity:
             try:
                 state = hass.states.get(solar_entity)
                 if state and state.state not in ("unavailable", "unknown"):
-                    solar_forecast_kwh_today = float(state.state)
+                    solar_forecast_kwh_remaining = float(state.state)
             except (ValueError, AttributeError):
                 pass  # solar failure is non-critical — cloud_coverage already fetched
 
         return ForecastData(
             forecast_available=True,
             cloud_coverage_avg=cloud_coverage_avg,
-            solar_forecast_kwh_today=solar_forecast_kwh_today,
+            solar_forecast_kwh_remaining=solar_forecast_kwh_remaining,
         )
     except Exception as exc:  # noqa: BLE001
         _LOGGER.warning("Forecast unavailable: %s. Using conservative defaults.", exc)
@@ -223,13 +228,19 @@ any additional scheduling complexity.
 @dataclass
 class ForecastData:
     forecast_available: bool = False
-    cloud_coverage_avg: float = 50.0          # 0–100; 50 = neutral/unknown
-    solar_forecast_kwh_today: float | None = None
+    cloud_coverage_avg: float = 50.0              # 0–100; 50 = neutral/unknown
+    solar_forecast_kwh_remaining: float | None = None  # kWh remaining today
 ```
 
 `ForecastData()` with no arguments is a valid "no forecast" sentinel — all defaults
-are conservative (50% cloud coverage = don't raise or lower SOC floor; Story 3.2 defines
-the threshold logic). No changes to this dataclass are needed.
+are conservative (50% cloud coverage = don’t raise or lower SOC floor; Story 3.2 defines
+the threshold logic).
+
+**Important:** The `forecast_solar` entity must point to the
+`sensor.energy_production_today_remaining` sensor (not
+`sensor.energy_production_today`). The "Remaining Today" value is more
+actionable for afternoon SOC decisions — it reflects how much production is
+still expected rather than total daily output including already-produced energy.
 
 ### Config Entity Key Access Pattern
 
@@ -243,7 +254,7 @@ config = {
         "pv_production": "sensor.sph10000_input_power",
         "power_to_user": "sensor.sph10000_pac_to_user_total",
         "weather": "weather.openweathermap",       # optional — may be absent
-        "forecast_solar": "sensor.forecast_solar_energy_today",  # optional
+        "forecast_solar": "sensor.energy_production_today_remaining",  # optional
     },
     # ... thresholds, time_strategy, seasonal_targets
 }

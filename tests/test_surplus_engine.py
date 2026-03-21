@@ -194,7 +194,7 @@ class TestForecastData:
         fd = se.ForecastData()
         assert fd.forecast_available is False
         assert fd.cloud_coverage_avg == 50.0
-        assert fd.solar_forecast_kwh_today is None
+        assert fd.solar_forecast_kwh_remaining is None
 
     def test_field_forecast_available_default_false(self, se):
         assert se.ForecastData().forecast_available is False
@@ -202,17 +202,17 @@ class TestForecastData:
     def test_field_cloud_coverage_avg_default(self, se):
         assert se.ForecastData().cloud_coverage_avg == 50.0
 
-    def test_field_solar_forecast_kwh_today_default_none(self, se):
-        assert se.ForecastData().solar_forecast_kwh_today is None
+    def test_field_solar_forecast_kwh_remaining_default_none(self, se):
+        assert se.ForecastData().solar_forecast_kwh_remaining is None
 
     def test_override_fields(self, se):
         fd = se.ForecastData(
             forecast_available=True,
             cloud_coverage_avg=30.0,
-            solar_forecast_kwh_today=12.5,
+            solar_forecast_kwh_remaining=12.5,
         )
         assert fd.forecast_available is True
-        assert fd.solar_forecast_kwh_today == 12.5
+        assert fd.solar_forecast_kwh_remaining == 12.5
 
 
 # ===========================================================================
@@ -309,10 +309,11 @@ class TestModuleLevelDeclarations:
 # ===========================================================================
 
 class TestSkeletonNotImplemented:
-    def test_surplus_calculator_get_soc_floor_raises(self, se, snapshot):
+    def test_surplus_calculator_get_soc_floor_returns_int(self, se, snapshot):
         calc = se.SurplusCalculator(config={})
-        with pytest.raises(NotImplementedError):
-            calc.get_soc_floor(snapshot)
+        result = calc.get_soc_floor(snapshot)
+        assert isinstance(result, int)
+        assert result >= se.SOC_HARD_FLOOR
 
     def test_surplus_calculator_calculate_surplus_raises(self, se, snapshot):
         calc = se.SurplusCalculator(config={})

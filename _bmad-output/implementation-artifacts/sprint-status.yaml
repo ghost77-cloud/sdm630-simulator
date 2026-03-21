@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-03-21T00:00:00"
-last_updated: "2026-03-21T18:00:00"
+last_updated: "2026-03-21T19:00:00"
 project: sdm630-simulator
 project_key: NOKEY
 tracking_system: file-system
@@ -43,16 +43,16 @@ story_location: _bmad-output/implementation-artifacts
 
 development_status:
   # Epic 1: Foundation — Configuration, Module Scaffold, and Logging
-  epic-1: in-progress
+  epic-1: done
   1-1-yaml-configuration-schema-and-parsing: done
   1-2-surplus-engine-py-module-scaffold-with-dataclasses: done
   1-3-integration-wiring-in-sensor-py-and-evaluation-loop: done
-  1-4-structured-decision-logging: ready-for-dev
+  1-4-structured-decision-logging: done
   epic-1-retrospective: optional
 
   # Epic 2: Core Surplus Logic — SOC Strategy, Buffer Math, and Hysteresis
   epic-2: in-progress
-  2-1-soc-floor-determination-via-time-window-strategy: ready-for-dev
+  2-1-soc-floor-determination-via-time-window-strategy: done
   2-2-surplus-calculation-with-battery-buffer: ready-for-dev
   2-3-hysteresis-filter-state-machine: ready-for-dev
   epic-2-retrospective: optional

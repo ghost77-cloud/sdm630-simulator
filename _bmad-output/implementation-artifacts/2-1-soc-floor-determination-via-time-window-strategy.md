@@ -1,6 +1,6 @@
 # Story 2.1: SOC Floor Determination via Time-Window Strategy
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -86,19 +86,19 @@ Then all assertions pass without any HA runtime dependency
 
 ## Tasks / Subtasks
 
-- [ ] Add `import re` at module top of `surplus_engine.py` (AC: #1–#6)
-- [ ] Implement `SurplusCalculator._resolve_time_token(token, snapshot) -> datetime | None` (AC: #1–#6)
-  - [ ] Parse `"sunrise+Xh"` / `"sunset-Xh"` pattern via regex
-  - [ ] Return `None` when snapshot solar field is `None`
-  - [ ] Parse plain `"HH:MM"` as a timezone-aware `datetime` on the same date as `snapshot.timestamp`
-  - [ ] Log WARNING and return `None` for unrecognised token formats
-- [ ] Implement `SurplusCalculator.get_soc_floor(snapshot) -> int` (AC: #1–#9)
-  - [ ] Iterate `time_strategy` rules top-to-bottom
-  - [ ] For each `before:` rule: call `_resolve_time_token`; if `None`, skip rule
-  - [ ] Return rule `soc_floor` (clamped to `SOC_HARD_FLOOR`) when `snapshot.timestamp < boundary`
-  - [ ] For `default:` rule: resolve seasonal target from config with DEFAULTS fallback
-  - [ ] Clamp + warn when seasonal target < `SOC_HARD_FLOOR`
-  - [ ] Final fallback: return `SOC_HARD_FLOOR` (defensive, should not occur with valid config)
+- [x] Add `import re` at module top of `surplus_engine.py` (AC: #1–#6)
+- [x] Implement `SurplusCalculator._resolve_time_token(token, snapshot) -> datetime | None` (AC: #1–#6)
+  - [x] Parse `"sunrise+Xh"` / `"sunset-Xh"` pattern via regex
+  - [x] Return `None` when snapshot solar field is `None`
+  - [x] Parse plain `"HH:MM"` as a timezone-aware `datetime` on the same date as `snapshot.timestamp`
+  - [x] Log WARNING and return `None` for unrecognised token formats
+- [x] Implement `SurplusCalculator.get_soc_floor(snapshot) -> int` (AC: #1–#9)
+  - [x] Iterate `time_strategy` rules top-to-bottom
+  - [x] For each `before:` rule: call `_resolve_time_token`; if `None`, skip rule
+  - [x] Return rule `soc_floor` (clamped to `SOC_HARD_FLOOR`) when `snapshot.timestamp < boundary`
+  - [x] For `default:` rule: resolve seasonal target from config with DEFAULTS fallback
+  - [x] Clamp + warn when seasonal target < `SOC_HARD_FLOOR`
+  - [x] Final fallback: return `SOC_HARD_FLOOR` (defensive, should not occur with valid config)
 
 ## Dev Notes
 
@@ -376,10 +376,28 @@ custom_components/sdm630_simulator/
 
 ### Agent Model Used
 
-Claude Sonnet 4.6 (SM story context engine — Bob)
+Claude Opus 4.6 (Dev Agent — Amelia)
 
 ### Debug Log References
 
+- Existing test `test_surplus_calculator_get_soc_floor_raises` updated to `test_surplus_calculator_get_soc_floor_returns_int` since `get_soc_floor` no longer raises `NotImplementedError`
+
 ### Completion Notes List
 
+- Implemented `_resolve_time_token()`: parses `sunrise+Xh`, `sunset-Xh`, plain `HH:MM` tokens; returns `None` for unresolvable/invalid tokens with WARNING log
+- Implemented `get_soc_floor()`: iterates time_strategy rules top-to-bottom, resolves seasonal targets with DEFAULTS fallback, clamps to SOC_HARD_FLOOR with warning
+- Added `import re` and `timedelta` to imports
+- Added `from . import DEFAULTS` behind `if __package__:` guard
+- 27 new unit tests covering AC1–AC10 plus `_resolve_time_token` edge cases
+- All 191 tests pass (0 regressions)
+
+### Change Log
+
+- 2026-03-21: Story 2.1 implemented — `get_soc_floor` + `_resolve_time_token` in surplus_engine.py, tests in test_soc_floor.py
+- 2026-03-21: Code review passed (approved). P-01 note: `ForecastData.solar_forecast_kwh_today` renamed to `solar_forecast_kwh_remaining` (out-of-scope but correct; Story 3.1 artefact already references new name). D-01–D-03 deferred to future stories.
+
 ### File List
+
+- surplus_engine.py (modified — added `re`, `timedelta` imports, `DEFAULTS` import, `_resolve_time_token`, `get_soc_floor` implementation)
+- tests/test_soc_floor.py (new — 27 unit tests for AC1–AC10)
+- tests/test_surplus_engine.py (modified — updated skeleton test for `get_soc_floor`)

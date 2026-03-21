@@ -240,7 +240,7 @@ in subsequent stories — and importable without errors in plain Python tests.
 **When** instantiated with defaults\
 **Then** it contains: `forecast_available: bool = False`,
 `cloud_coverage_avg: float = 50.0`,
-`solar_forecast_kwh_today: float | None = None`
+`solar_forecast_kwh_remaining: float | None = None`
 
 **Given** `SensorSnapshot` dataclass\
 **When** instantiated\
@@ -595,10 +595,13 @@ smarter SOC decisions.
 and averaged into a single `cloud_coverage_avg: float` (0–100)\
 **And** `forecast_available` is set to `True`
 
-**Given** `forecast_solar:` entity is configured and available\
+**Given** `forecast_solar:` entity is configured and available (pointing to the
+`sensor.energy_production_today_remaining` sensor from the `forecast_solar`
+integration)\
 **When** `get_forecast(hass)` is awaited\
 **Then** `hass.states.get(config[CONF_FORECAST_SOLAR]).state` is read\
-**And** the value is stored as `solar_forecast_kwh_today: float`\
+**And** the value is stored as `solar_forecast_kwh_remaining: float` (kWh
+remaining for the rest of the day)\
 **And** `forecast_available` remains `True` (both sources combined)
 
 **Given** either forecast entity is `unavailable`, the service call raises an
@@ -606,7 +609,7 @@ exception, or the response is malformed\
 **When** `get_forecast(hass)` is awaited\
 **Then** the method catches the exception (no propagation)\
 **And** returns a `ForecastData` dataclass with `forecast_available=False`,
-`cloud_coverage_avg=50.0` (neutral default), `solar_forecast_kwh_today=None`\
+`cloud_coverage_avg=50.0` (neutral default), `solar_forecast_kwh_remaining=None`\
 **And** `_LOGGER.warning("Forecast unavailable: %s. Using conservative
 defaults.", reason)` is emitted
 
@@ -648,6 +651,16 @@ current time is past 13:00\
 where the seasonal target is 80; in winter months this floor may be higher)
 regardless of whether the `before: "sunset-3h"` window has been reached\
 **And** `result.reason` contains `"forecast_poor"`
+
+**Given** `snapshot.forecast.solar_forecast_kwh_remaining` is not `None` and
+its value is below `solar_remaining_threshold_kwh` (default: 2.0 kWh) and
+current time is past 12:00\
+**When** `calculate_surplus(snapshot)` is called\
+**Then** the effective SOC floor is raised to the seasonal target for the
+current month (same as the overcast path above)\
+**And** `result.reason` contains `"forecast_solar_low"`\
+**And** this check fires even when `cloud_coverage_avg` is neutral —
+`solar_forecast_kwh_remaining` is the more precise, panel-specific signal
 
 **Given** `snapshot.forecast.forecast_available == False`\
 **When** `calculate_surplus(snapshot)` is called\

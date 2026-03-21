@@ -32,6 +32,29 @@ And for December (month 12, seasonal_target=100), the effective floor is at mini
 And `result.reason` contains `"forecast_poor"`\
 And `result.forecast_available` = `True`
 
+**AC8 — Low solar remaining forecast: floor raised independent of cloud coverage**
+
+Given `snapshot.forecast.solar_forecast_kwh_remaining` is not `None` and
+its value is below the configurable threshold `solar_remaining_threshold_kwh`
+(default: 2.0 kWh) and `snapshot.timestamp.hour >= 12`\
+When `calculate_surplus(snapshot)` is called\
+Then the effective SOC floor is raised to
+`max(get_soc_floor(snapshot), seasonal_targets[month])` — same as
+the overcast path in AC2\
+And `result.reason` contains `"forecast_solar_low"`\
+And this rule fires even when `cloud_coverage_avg` is in the neutral range
+(20–70) — `solar_forecast_kwh_remaining` is the more precise signal because
+it comes directly from the `forecast_solar` integration (based on panel
+orientation, historical irradiation data, and weather) rather than generic
+cloud coverage from a weather service
+
+**Design rationale — solar remaining as primary signal:**
+The `forecast_solar` integration delivers panel-specific production estimates.
+A low `solar_forecast_kwh_remaining` value (e.g., 1.2 kWh at 14:00) is far
+more actionable than generic cloud coverage because it accounts for the
+panel's azimuth, tilt, shading, and local irradiation history. Cloud coverage
+remains the fallback when `forecast_solar` is not configured.
+
 **AC3 — Forecast unavailable: no change**
 
 Given `snapshot.forecast` is `None` or
@@ -77,10 +100,15 @@ Then the result is never below `SOC_HARD_FLOOR` (50)
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Implement `SurplusCalculator._apply_forecast_adjustment(snapshot, base_floor)` (AC: #1–#3, #6, #7)
+- [ ] Task 1: Implement `SurplusCalculator._apply_forecast_adjustment(snapshot, base_floor)` (AC: #1–#3, #6–#8)
   - [ ] Return `(base_floor, "forecast_unavailable")` if `snapshot.forecast is None` or
     `not snapshot.forecast.forecast_available`
   - [ ] Return `(base_floor, "forecast_good")` if `cloud_coverage_avg < 20` and `hour < 15`
+    and solar remaining is not critically low
+  - [ ] If `solar_forecast_kwh_remaining is not None` and
+    `solar_forecast_kwh_remaining < solar_remaining_threshold_kwh` and `hour >= 12`:
+    - [ ] Resolve seasonal target (same as cloud path)
+    - [ ] Return `(max(base_floor, seasonal_floor), "forecast_solar_low")`
   - [ ] If `cloud_coverage_avg > 70` and `hour >= 13`:
     - [ ] Resolve `seasonal_targets` from config (same pattern as `get_soc_floor` — merge
       DEFAULTS with config, month key lookup)
@@ -88,7 +116,15 @@ Then the result is never below `SOC_HARD_FLOOR` (50)
     - [ ] Return `(max(base_floor, seasonal_floor), "forecast_poor")`
   - [ ] Default/neutral path: return `(base_floor, "forecast_neutral")`
 
-- [ ] Task 2: Integrate forecast adjustment into `calculate_surplus` (AC: #1–#3, #6)
+- [ ] Task 2: Add `solar_remaining_threshold_kwh` config key (AC: #8)
+  - [ ] Add `CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"` to
+    `__init__.py` config key constants
+  - [ ] Add `"solar_remaining_threshold_kwh": 2.0` to `DEFAULTS` dict (already done)
+  - [ ] Add `vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float)` to
+    `COMPONENT_SCHEMA`
+  - [ ] Add key to `_SCALAR_KEYS` set in `async_setup`
+
+- [ ] Task 3: Integrate forecast adjustment into `calculate_surplus` (AC: #1–#3, #6)
   - [ ] Replace `soc_floor = self.get_soc_floor(snapshot)` with:
     - [ ] `base_floor = self.get_soc_floor(snapshot)`
     - [ ] `soc_floor, forecast_tag = self._apply_forecast_adjustment(snapshot, base_floor)`
@@ -115,6 +151,14 @@ Then the result is never below `SOC_HARD_FLOOR` (50)
   - [ ] Test AC6: `cloud_coverage_avg=20`, `hour=10` → neutral path, floor unchanged
   - [ ] Test AC6: `cloud_coverage_avg=70`, `hour=13` → neutral path, floor unchanged
   - [ ] Test AC7: seasonal_target=30 (misconfigured, below SOC_HARD_FLOOR) → clamped to 50
+  - [ ] Test AC8: `solar_forecast_kwh_remaining=1.5`, `hour=14`, threshold=2.0 →
+    floor raised, reason contains `"forecast_solar_low"`
+  - [ ] Test AC8 (above threshold): `solar_forecast_kwh_remaining=5.0`, `hour=14` →
+    neutral path, floor unchanged
+  - [ ] Test AC8 (None): `solar_forecast_kwh_remaining=None`, `cloud_coverage_avg=50` →
+    neutral path (solar signal absent, cloud neutral)
+  - [ ] Test AC8 (before noon): `solar_forecast_kwh_remaining=0.5`, `hour=10` →
+    not triggered (too early for afternoon protection)
 
 ## Dev Notes
 
@@ -195,33 +239,57 @@ def _apply_forecast_adjustment(
 ) -> "tuple[int, str]":
     """Return (adjusted_soc_floor, forecast_reason_tag).
 
-    Raises the SOC floor to the seasonal target when overcast forecast
-    signals poor PV production for the remainder of the day.
+    Raises the SOC floor to the seasonal target when forecast signals
+    poor PV production for the remainder of the day.
+    Uses solar_forecast_kwh_remaining (from forecast_solar) as the
+    primary signal; falls back to cloud_coverage_avg (from weather).
     Never returns a floor below SOC_HARD_FLOOR.
     """
     if snapshot.forecast is None or not snapshot.forecast.forecast_available:
         return base_floor, "forecast_unavailable"
 
     cloud_avg = snapshot.forecast.cloud_coverage_avg
+    solar_remaining = snapshot.forecast.solar_forecast_kwh_remaining
     hour = snapshot.timestamp.hour
+    threshold_kwh = self.config.get("solar_remaining_threshold_kwh", 2.0)
 
+    # Sunny fast-path: only if solar remaining is also healthy (or unknown)
     if cloud_avg < 20 and hour < 15:
-        return base_floor, "forecast_good"
+        if solar_remaining is None or solar_remaining >= threshold_kwh:
+            return base_floor, "forecast_good"
 
+    # Primary signal: solar forecast remaining is critically low
+    if (solar_remaining is not None
+            and solar_remaining < threshold_kwh
+            and hour >= 12):
+        seasonal_floor = self._resolve_seasonal_floor(snapshot)
+        return max(base_floor, seasonal_floor), "forecast_solar_low"
+
+    # Fallback signal: high cloud coverage from weather service
     if cloud_avg > 70 and hour >= 13:
-        # Resolve seasonal target — same dual-import pattern as get_soc_floor
-        if __package__:
-            from . import DEFAULTS as _DEFAULTS
-        else:
-            _DEFAULTS = {}
-        default_seasonal = _DEFAULTS.get("seasonal_targets", {})
-        seasonal_targets = {**default_seasonal, **self.config.get("seasonal_targets", {})}
-        month = snapshot.timestamp.month
-        seasonal_floor = int(seasonal_targets.get(month, SOC_HARD_FLOOR))
-        seasonal_floor = max(seasonal_floor, SOC_HARD_FLOOR)
+        seasonal_floor = self._resolve_seasonal_floor(snapshot)
         return max(base_floor, seasonal_floor), "forecast_poor"
 
     return base_floor, "forecast_neutral"
+
+def _resolve_seasonal_floor(self, snapshot: "SensorSnapshot") -> int:
+    """Resolve the seasonal SOC target for the current month.
+
+    Extracted as a helper because both the solar-remaining and
+    cloud-coverage paths need the same seasonal-target resolution.
+    """
+    if __package__:
+        from . import DEFAULTS as _DEFAULTS
+    else:
+        _DEFAULTS = {}
+    default_seasonal = _DEFAULTS.get("seasonal_targets", {})
+    seasonal_targets = {
+        **default_seasonal,
+        **self.config.get("seasonal_targets", {}),
+    }
+    month = snapshot.timestamp.month
+    seasonal_floor = int(seasonal_targets.get(month, SOC_HARD_FLOOR))
+    return max(seasonal_floor, SOC_HARD_FLOOR)
 ```
 
 ### Updated `calculate_surplus` — Minimal Diff
@@ -309,7 +377,7 @@ needs `hass` passed at call time (not stored), so `SurplusEngine` passes
 class ForecastData:
     forecast_available: bool = False
     cloud_coverage_avg: float = 50.0     # 50 = neutral: neither < 20 nor > 70
-    solar_forecast_kwh_today: float | None = None
+    solar_forecast_kwh_remaining: float | None = None
 ```
 
 **Why `cloud_coverage_avg=50.0` as default?** Deliberately placed in the

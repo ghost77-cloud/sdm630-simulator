@@ -780,3 +780,284 @@ class TestSetupPlatform:
         sensor = added_entities[0]
         assert isinstance(sensor, mod.SDM630SimSensor)
         assert sensor._config is sample_config
+
+
+# ===========================================================================
+# Story 1.4 — Structured Decision Logging
+# ===========================================================================
+
+
+def _make_result(se, **overrides):
+    """Build an EvaluationResult with sensible defaults, applying overrides."""
+    defaults = dict(
+        reported_kw=0.0, real_surplus_kw=0.0, buffer_used_kw=0.0,
+        soc_percent=0.0, soc_floor_active=50, charging_state="INACTIVE",
+        reason="test", forecast_available=False,
+    )
+    defaults.update(overrides)
+    return se.EvaluationResult(**defaults)
+
+
+# ===========================================================================
+# AC1 — Per-cycle DEBUG log (exact format)
+# ===========================================================================
+
+class TestDebugDecisionLog:
+    """Story 1.4 AC1: _evaluation_tick emits a DEBUG log per cycle."""
+
+    def test_debug_log_called_on_every_tick(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=_make_result(se))
+
+        with patch.object(mod._LOGGER, "debug") as mock_debug:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            # At least one debug call should contain "SDM630 Eval:"
+            eval_calls = [c for c in mock_debug.call_args_list
+                          if c[0][0].startswith("SDM630 Eval:")]
+            assert len(eval_calls) == 1
+
+    def test_debug_log_exact_format_string(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=_make_result(
+            se, real_surplus_kw=1.23, buffer_used_kw=0.45,
+            soc_percent=80.0, soc_floor_active=50,
+            charging_state="ACTIVE", reported_kw=1.23,
+            reason="surplus_available", forecast_available=True,
+        ))
+
+        with patch.object(mod._LOGGER, "debug") as mock_debug:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            eval_calls = [c for c in mock_debug.call_args_list
+                          if c[0][0].startswith("SDM630 Eval:")]
+            assert len(eval_calls) == 1
+            fmt = eval_calls[0][0][0]
+            assert "surplus=%.2fkW" in fmt
+            assert "buffer=%.2fkW" in fmt
+            assert "SOC=%d%%" in fmt
+            assert "floor=%d%%" in fmt
+            assert "state=%s" in fmt
+            assert "reported=%.2fkW" in fmt
+            assert "reason=%s" in fmt
+            assert "forecast=%s" in fmt
+
+    def test_debug_log_positional_args_order(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        result = _make_result(
+            se, real_surplus_kw=2.50, buffer_used_kw=0.30,
+            soc_percent=75.0, soc_floor_active=40,
+            charging_state="ACTIVE", reported_kw=2.20,
+            reason="surplus_ok", forecast_available=False,
+        )
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=result)
+
+        with patch.object(mod._LOGGER, "debug") as mock_debug:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            eval_calls = [c for c in mock_debug.call_args_list
+                          if c[0][0].startswith("SDM630 Eval:")]
+            args = eval_calls[0][0][1:]  # positional args after format string
+            assert args == (2.50, 0.30, 75.0, 40, "ACTIVE", 2.20, "surplus_ok", False)
+
+    def test_debug_log_emitted_on_second_tick_too(self, sensor_ctx, sample_config):
+        """DEBUG log fires every tick, not just the first."""
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=_make_result(se))
+
+        now = datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        asyncio.run(s._evaluation_tick(now))  # first tick
+
+        with patch.object(mod._LOGGER, "debug") as mock_debug:
+            asyncio.run(s._evaluation_tick(now))  # second tick
+            eval_calls = [c for c in mock_debug.call_args_list
+                          if c[0][0].startswith("SDM630 Eval:")]
+            assert len(eval_calls) == 1
+
+
+# ===========================================================================
+# AC2 — Fail-safe WARNING log
+# ===========================================================================
+
+class TestFailsafeWarningLog:
+    """Story 1.4 AC2: FAILSAFE triggers WARNING in addition to DEBUG."""
+
+    def test_warning_emitted_on_failsafe(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        result = _make_result(
+            se, charging_state="FAILSAFE", reason="sensor_stale",
+        )
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=result)
+
+        with patch.object(mod._LOGGER, "warning") as mock_warn:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            mock_warn.assert_called_once()
+
+    def test_warning_exact_format(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        result = _make_result(
+            se, charging_state="FAILSAFE", reason="sensor_stale",
+        )
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=result)
+
+        with patch.object(mod._LOGGER, "warning") as mock_warn:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            fmt = mock_warn.call_args[0][0]
+            assert fmt == "SDM630 FAIL-SAFE: %s. Reporting 0 kW."
+            assert mock_warn.call_args[0][1] == "sensor_stale"
+
+    def test_no_warning_for_non_failsafe(self, sensor_ctx, sample_config):
+        """ACTIVE state must NOT trigger a WARNING."""
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        result = _make_result(se, charging_state="ACTIVE", reason="surplus_ok")
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=result)
+
+        with patch.object(mod._LOGGER, "warning") as mock_warn:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            mock_warn.assert_not_called()
+
+    def test_no_warning_for_inactive(self, sensor_ctx, sample_config):
+        """INACTIVE state must NOT trigger a WARNING."""
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        result = _make_result(se, charging_state="INACTIVE", reason="no_surplus")
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=result)
+
+        with patch.object(mod._LOGGER, "warning") as mock_warn:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            mock_warn.assert_not_called()
+
+    def test_both_debug_and_warning_on_failsafe(self, sensor_ctx, sample_config):
+        """FAILSAFE emits BOTH DEBUG (full context) and WARNING."""
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        result = _make_result(
+            se, charging_state="FAILSAFE", reason="sensor_stale",
+        )
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=result)
+
+        with patch.object(mod._LOGGER, "debug") as mock_debug, \
+             patch.object(mod._LOGGER, "warning") as mock_warn:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            eval_calls = [c for c in mock_debug.call_args_list
+                          if c[0][0].startswith("SDM630 Eval:")]
+            assert len(eval_calls) == 1
+            mock_warn.assert_called_once()
+
+
+# ===========================================================================
+# AC4 — Startup INFO log format validation (extends Story 1.3 AC5 tests)
+# ===========================================================================
+
+class TestStartupLogFormat:
+    """Story 1.4 AC4: validate exact format of startup INFO log."""
+
+    def test_startup_log_exact_format(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=_make_result(se))
+
+        with patch.object(mod._LOGGER, "info") as mock_info:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            fmt = mock_info.call_args[0][0]
+            assert fmt == "SDM630 SurplusEngine started. Interval=%ds, entities=%d configured"
+
+    def test_startup_log_args(self, sensor_ctx, sample_config):
+        mod, mocks = sensor_ctx
+        se = mocks["se"]
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+
+        s = _make_sensor(mod, mock_hass, sample_config)
+        asyncio.run(s.async_added_to_hass())
+        s._engine = MagicMock()
+        s._engine.evaluate_cycle = AsyncMock(return_value=_make_result(se))
+
+        with patch.object(mod._LOGGER, "info") as mock_info:
+            asyncio.run(s._evaluation_tick(
+                datetime(2026, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+            ))
+            args = mock_info.call_args[0][1:]
+            assert args == (15, 4)  # 15s interval, 4 entities

@@ -34,7 +34,7 @@ in subsequent stories — and importable without errors in plain Python tests.
    **When** instantiated with defaults
    **Then** it contains: `forecast_available: bool = False`,
    `cloud_coverage_avg: float = 50.0`,
-   `solar_forecast_kwh_today: float | None = None`
+   `solar_forecast_kwh_remaining: float | None = None`
 
 5. **Given** `SensorSnapshot` dataclass
    **When** instantiated
@@ -66,7 +66,7 @@ in subsequent stories — and importable without errors in plain Python tests.
 - [x] Define `ForecastData` dataclass (AC: #4)
   - [x] `forecast_available: bool = False`
   - [x] `cloud_coverage_avg: float = 50.0`
-  - [x] `solar_forecast_kwh_today: float | None = None`
+  - [x] `solar_forecast_kwh_remaining: float | None = None`
 - [x] Define `SensorSnapshot` dataclass (AC: #5)
   - [x] All required fields with correct types
   - [x] `forecast: ForecastData | None = None` as last field with default
@@ -184,7 +184,7 @@ class EvaluationResult:
 class ForecastData:
     forecast_available: bool = False
     cloud_coverage_avg: float = 50.0
-    solar_forecast_kwh_today: float | None = None
+    solar_forecast_kwh_remaining: float | None = None
 ```
 
 #### `SensorSnapshot` (fields with defaults must come after fields without)

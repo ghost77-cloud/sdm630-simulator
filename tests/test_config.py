@@ -44,6 +44,9 @@ class TestDefaults:
     def test_defaults_battery_capacity_kwh(self, comp):
         assert comp.DEFAULTS["battery_capacity_kwh"] == 10.0
 
+    def test_defaults_solar_remaining_threshold_kwh(self, comp):
+        assert comp.DEFAULTS["solar_remaining_threshold_kwh"] == 2.0
+
     def test_defaults_seasonal_targets_has_all_months(self, comp):
         st = comp.DEFAULTS["seasonal_targets"]
         assert set(st.keys()) == set(range(1, 13))

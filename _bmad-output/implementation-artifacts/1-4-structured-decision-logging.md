@@ -1,6 +1,6 @@
 # Story 1.4: Structured Decision Logging
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -63,21 +63,21 @@ with `config["evaluation_interval"]` and the count of entity IDs from
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add DEBUG decision log call in `_evaluation_tick` (AC1, AC3)
-  - [ ] After `await engine.evaluate_cycle(snapshot)` returns `result`
-  - [ ] Add `_LOGGER.debug("SDM630 Eval: surplus=%.2fkW ...")` with exact
+- [x] Task 1: Add DEBUG decision log call in `_evaluation_tick` (AC1, AC3)
+  - [x] After `await engine.evaluate_cycle(snapshot)` returns `result`
+  - [x] Add `_LOGGER.debug("SDM630 Eval: surplus=%.2fkW ...")` with exact
         format string and positional args in the correct order
-  - [ ] Do NOT add an `if _LOGGER.isEnabledFor(logging.DEBUG):` guard —
+  - [x] Do NOT add an `if _LOGGER.isEnabledFor(logging.DEBUG):` guard —
         the `%`-style lazy formatting already avoids string interpolation cost
-- [ ] Task 2: Add WARNING log on fail-safe path (AC2)
-  - [ ] Detect `result.charging_state == "FAILSAFE"` inside `_evaluation_tick`
-  - [ ] Call `_LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", result.reason)`
-  - [ ] This call is in addition to the DEBUG call — both are emitted for
+- [x] Task 2: Add WARNING log on fail-safe path (AC2)
+  - [x] Detect `result.charging_state == "FAILSAFE"` inside `_evaluation_tick`
+  - [x] Call `_LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", result.reason)`
+  - [x] This call is in addition to the DEBUG call — both are emitted for
         a FAILSAFE result (DEBUG gives full context; WARNING signals the event)
-- [ ] Task 3: Add startup INFO log in `async_added_to_hass` (AC4)
-  - [ ] After the evaluation loop (`async_track_time_interval`) is started
-  - [ ] Call `_LOGGER.info("SDM630 SurplusEngine started. Interval=%ds, entities=%d configured", ...)`
-  - [ ] `entities=%d` = `len(config["entities"])` (count of entity ID strings)
+- [x] Task 3: Add startup INFO log in `async_added_to_hass` (AC4)
+  - [x] After the evaluation loop (`async_track_time_interval`) is started
+  - [x] Call `_LOGGER.info("SDM630 SurplusEngine started. Interval=%ds, entities=%d configured", ...)`
+  - [x] `entities=%d` = `len(config["entities"])` (count of entity ID strings)
 
 ## Dev Notes
 
@@ -257,10 +257,29 @@ for Epic 2/4 to function correctly.
 
 ### Agent Model Used
 
-Claude Sonnet 4.6 (SM story context engine)
+Claude Opus 4.6 (dev agent)
 
 ### Debug Log References
 
+- RED phase: 7 new tests failed as expected (4 DEBUG, 3 WARNING)
+- GREEN phase: All 11 Story 1.4 tests passed after adding 3 log calls
+- Full suite: 163/163 tests passed, zero regressions
+
 ### Completion Notes List
 
+- Task 1: Added `_LOGGER.debug("SDM630 Eval: ...")` with 8 positional args matching AC1 format exactly. Uses `%`-style lazy formatting, no f-strings. Placed after `evaluate_cycle()` returns, before Modbus register write.
+- Task 2: Added `if result.charging_state == "FAILSAFE":` guard with `_LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", result.reason)`. Both DEBUG and WARNING fire for FAILSAFE results.
+- Task 3: Startup INFO log was already implemented in Story 1.3 using a `_first_tick` flag inside `_evaluation_tick`. Format matches AC4 exactly: `"SDM630 SurplusEngine started. Interval=%ds, entities=%d configured"`. No changes needed.
+- Tests: 11 new test methods added in `tests/test_sensor.py` across 3 test classes: `TestDebugDecisionLog` (4), `TestFailsafeWarningLog` (5), `TestStartupLogFormat` (2)
+
+### Change Log
+
+- 2026-03-21: Story 1.4 implemented — structured decision logging (DEBUG per-cycle, WARNING on FAILSAFE, startup INFO verified)
+- 2026-03-21: Code review passed (APPROVE, 0 actionable findings). Status → done.
+
 ### File List
+
+| Action | File |
+|--------|------|
+| MODIFY | `sensor.py` |
+| MODIFY | `tests/test_sensor.py` |

@@ -260,6 +260,7 @@ sdm630_sim:
   wallbox_threshold_kw: 4.2            # reported surplus floor, default: 4.2
   hold_time_minutes: 10                # hysteresis hold duration, default: 10
   soc_hard_floor: 50                   # absolute battery protection, default: 50
+  solar_remaining_threshold_kwh: 2.0   # kWh remaining below which SOC floor is raised
 
   entities:
     soc:            sensor.sph10000_storage_soc
@@ -268,7 +269,7 @@ sdm630_sim:
     power_to_user:  sensor.sph10000_pac_to_user_total
     sun:            sun.sun                              # for sunset-relative times
     weather:        weather.openweathermap               # optional
-    forecast_solar: sensor.forecast_solar_energy_today   # optional
+    forecast_solar: sensor.energy_production_today_remaining   # optional
 
   time_strategy:
     - before: "11:00"
@@ -312,7 +313,7 @@ sdm630_sim:
 | # | Gap | Severity | Resolution |
 |---|---|---|---|
 | L1 | Exact Growatt entity IDs for Ghost's setup not pinned in architecture | Medium | Configurable in `configuration.yaml` — not an architecture concern |
-| L2 | Exact `forecast_solar` attribute name (today vs. tomorrow kWh) | Low | Resolved during `ForecastConsumer` implementation |
+| L2 | `forecast_solar` entity resolved to `sensor.energy_production_today_remaining` | Resolved | "Remaining Today" is more actionable than total-today for afternoon SOC decisions |
 | L3 | Epics/Stories not yet created | Low | Next workflow step |
 | L4 | `pytest` / `pytest-asyncio` not in `manifest.json` | Low | Dev-only dependencies; excluded from HA package |
 

@@ -161,6 +161,18 @@ class SDM630SimSensor(SensorEntity):
         )
 
         result = await self._engine.evaluate_cycle(snapshot)
+
+        # Story 1.4: structured decision log
+        _LOGGER.debug(
+            "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
+            "state=%s reported=%.2fkW reason=%s forecast=%s",
+            result.real_surplus_kw, result.buffer_used_kw, result.soc_percent,
+            result.soc_floor_active, result.charging_state, result.reported_kw,
+            result.reason, result.forecast_available,
+        )
+        if result.charging_state == "FAILSAFE":
+            _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", result.reason)
+
         input_data_block.set_float(TOTAL_POWER, result.reported_kw)
         self._attr_native_value = result.reported_kw
         self.async_write_ha_state()
