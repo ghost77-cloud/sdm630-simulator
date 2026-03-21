@@ -321,20 +321,24 @@ class TestSkeletonNotImplemented:
         result = calc.calculate_surplus(snapshot)
         assert isinstance(result, se.EvaluationResult)
 
-    def test_hysteresis_filter_update_raises(self, se, now):
-        hf = se.HysteresisFilter(hold_time_minutes=10)
-        with pytest.raises(NotImplementedError):
-            hf.update(1.5, now)
+    def test_hysteresis_filter_update_returns_float(self, se, now):
+        """HysteresisFilter.update() is implemented in Story 2.3 — returns float."""
+        hf = se.HysteresisFilter(config={"hold_time_minutes": 10, "wallbox_threshold_kw": 4.2})
+        result = hf.update(1.5, now)
+        assert isinstance(result, float)
 
-    def test_hysteresis_filter_force_failsafe_raises(self, se):
-        hf = se.HysteresisFilter(hold_time_minutes=10)
-        with pytest.raises(NotImplementedError):
-            hf.force_failsafe("sensor_unavailable")
+    def test_hysteresis_filter_force_failsafe_works(self, se):
+        """HysteresisFilter.force_failsafe() is implemented in Story 2.3 — transitions to FAILSAFE."""
+        hf = se.HysteresisFilter(config={})
+        hf.force_failsafe("sensor_unavailable")
+        assert hf.state == "FAILSAFE"
 
-    def test_hysteresis_filter_resume_raises(self, se):
-        hf = se.HysteresisFilter(hold_time_minutes=10)
-        with pytest.raises(NotImplementedError):
-            hf.resume()
+    def test_hysteresis_filter_resume_works(self, se):
+        """HysteresisFilter.resume() is implemented in Story 2.3 — transitions to INACTIVE."""
+        hf = se.HysteresisFilter(config={})
+        hf.force_failsafe("test")
+        hf.resume()
+        assert hf.state == "INACTIVE"
 
     def test_forecast_consumer_get_forecast_raises(self, se):
         fc = se.ForecastConsumer(config={})
@@ -358,19 +362,25 @@ class TestSurplusEngineDefault:
         assert result is not None
 
     def test_evaluate_cycle_default_reported_kw(self, se, snapshot):
+        """SurplusEngine.evaluate_cycle() is fully implemented in Story 2.3 — returns real kW."""
         engine = se.SurplusEngine(config={})
         result = asyncio.run(engine.evaluate_cycle(snapshot))
-        assert result.reported_kw == 0.0
+        assert isinstance(result.reported_kw, float)
+        assert result.reported_kw >= 0.0
 
     def test_evaluate_cycle_default_charging_state_inactive(self, se, snapshot):
+        """charging_state is one of the three valid states (Story 2.3)."""
         engine = se.SurplusEngine(config={})
         result = asyncio.run(engine.evaluate_cycle(snapshot))
-        assert result.charging_state == "INACTIVE"
+        assert result.charging_state in ("ACTIVE", "INACTIVE", "FAILSAFE")
 
     def test_evaluate_cycle_default_reason(self, se, snapshot):
+        """reason is a non-empty string (Story 2.3 — no longer a stub placeholder)."""
         engine = se.SurplusEngine(config={})
         result = asyncio.run(engine.evaluate_cycle(snapshot))
-        assert result.reason == "engine_not_yet_implemented"
+        assert isinstance(result.reason, str)
+        assert len(result.reason) > 0
+        assert result.reason != "engine_not_yet_implemented"
 
     def test_evaluate_cycle_is_coroutine(self, se):
         """evaluate_cycle must be async."""

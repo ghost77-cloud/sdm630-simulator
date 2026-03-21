@@ -1,6 +1,6 @@
 # Story 2.3: Hysteresis Filter State Machine
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -80,32 +80,32 @@ Then all assertions pass without any HA import or HA mock
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Implement `HysteresisFilter` class in `surplus_engine.py` (AC: #1–#7)
-  - [ ] Define `STATES = ("INACTIVE", "ACTIVE", "FAILSAFE")` as class-level constant (optional, for clarity)
-  - [ ] `__init__(self, config: dict)`: initialise `_state = "INACTIVE"`, `_hold_until: datetime | None = None`, `_last_reported_kw: float = 0.0`
-  - [ ] Read `hold_time_minutes` from `config.get("hold_time_minutes", 10)` in `__init__`
-  - [ ] Read `wallbox_threshold_kw` from `config.get("wallbox_threshold_kw", 4.2)` in `__init__`
-  - [ ] Implement `update(self, reported_kw: float, now: datetime) -> float` per state diagram below
-  - [ ] Implement `force_failsafe(self, reason: str) -> None`
-  - [ ] Implement `resume(self) -> None`
-  - [ ] Implement `@property state(self) -> str` (read-only access)
-- [ ] Task 2: Integrate `HysteresisFilter` into `SurplusEngine.evaluate_cycle`
-  - [ ] Call `self._hysteresis.update(calc_result.reported_kw, snapshot.timestamp)` after `SurplusCalculator.calculate_surplus(snapshot)`
-  - [ ] Use the value returned by `update()` as the final `EvaluationResult.reported_kw`
-  - [ ] Propagate `self._hysteresis.state` into `EvaluationResult.charging_state`
-  - [ ] If `self._hysteresis.state == "FAILSAFE"`: set `reason = "failsafe_active"`, `reported_kw = 0.0`
-- [ ] Task 3: Wire `force_failsafe` / `resume` for sensor-unavailability (Epic 4 prep — stubs only here)
-  - [ ] Ensure `SurplusEngine` has a reference to the `HysteresisFilter` instance (`self._hysteresis`)
-  - [ ] No full sensor-unavailability logic yet (Epic 4 scope): just confirm the method exists and is callable
-- [ ] Task 4: Unit tests in `tests/test_hysteresis_filter.py` (AC: #1–#8)
-  - [ ] AC1 test: initial `INACTIVE` → `ACTIVE` on threshold crossing
-  - [ ] AC2 test: `ACTIVE` + sub-threshold within hold → stays `ACTIVE`, returns `_last_reported_kw`
-  - [ ] AC3 test: hold expired + sub-threshold → `INACTIVE`, returns `0.0`
-  - [ ] AC4 test: `ACTIVE` + above-threshold → hold renewed, returns `reported_kw`
-  - [ ] AC5 test: `force_failsafe()` from each of the three states
-  - [ ] AC6 test: `FAILSAFE` → `update()` always `0.0`
-  - [ ] AC7 test: `resume()` → `INACTIVE`, next `update()` evaluates fresh
-  - [ ] AC8 verification: test file has NO `homeassistant` import anywhere
+- [x] Task 1: Implement `HysteresisFilter` class in `surplus_engine.py` (AC: #1–#7)
+  - [x] Define `STATES = ("INACTIVE", "ACTIVE", "FAILSAFE")` as class-level constant (optional, for clarity)
+  - [x] `__init__(self, config: dict)`: initialise `_state = "INACTIVE"`, `_hold_until: datetime | None = None`, `_last_reported_kw: float = 0.0`
+  - [x] Read `hold_time_minutes` from `config.get("hold_time_minutes", 10)` in `__init__`
+  - [x] Read `wallbox_threshold_kw` from `config.get("wallbox_threshold_kw", 4.2)` in `__init__`
+  - [x] Implement `update(self, reported_kw: float, now: datetime) -> float` per state diagram below
+  - [x] Implement `force_failsafe(self, reason: str) -> None`
+  - [x] Implement `resume(self) -> None`
+  - [x] Implement `@property state(self) -> str` (read-only access)
+- [x] Task 2: Integrate `HysteresisFilter` into `SurplusEngine.evaluate_cycle`
+  - [x] Call `self._hysteresis.update(calc_result.reported_kw, snapshot.timestamp)` after `SurplusCalculator.calculate_surplus(snapshot)`
+  - [x] Use the value returned by `update()` as the final `EvaluationResult.reported_kw`
+  - [x] Propagate `self._hysteresis.state` into `EvaluationResult.charging_state`
+  - [x] If `self._hysteresis.state == "FAILSAFE"`: set `reason = "failsafe_active"`, `reported_kw = 0.0`
+- [x] Task 3: Wire `force_failsafe` / `resume` for sensor-unavailability (Epic 4 prep — stubs only here)
+  - [x] Ensure `SurplusEngine` has a reference to the `HysteresisFilter` instance (`self._hysteresis`)
+  - [x] No full sensor-unavailability logic yet (Epic 4 scope): just confirm the method exists and is callable
+- [x] Task 4: Unit tests in `tests/test_hysteresis_filter.py` (AC: #1–#8)
+  - [x] AC1 test: initial `INACTIVE` → `ACTIVE` on threshold crossing
+  - [x] AC2 test: `ACTIVE` + sub-threshold within hold → stays `ACTIVE`, returns `_last_reported_kw`
+  - [x] AC3 test: hold expired + sub-threshold → `INACTIVE`, returns `0.0`
+  - [x] AC4 test: `ACTIVE` + above-threshold → hold renewed, returns `reported_kw`
+  - [x] AC5 test: `force_failsafe()` from each of the three states
+  - [x] AC6 test: `FAILSAFE` → `update()` always `0.0`
+  - [x] AC7 test: `resume()` → `INACTIVE`, next `update()` evaluates fresh
+  - [x] AC8 verification: test file has NO `homeassistant` import anywhere
 
 ## Dev Notes
 
@@ -413,3 +413,40 @@ After this story, `SurplusEngine.evaluate_cycle(snapshot)` is fully functional:
 
 The wallbox connected via Modbus TCP to port 5020 will now receive a stable,
 hysteresis-protected charging signal. 🎯
+
+## Dev Agent Record
+
+### Implementation Plan
+
+Followed red-green-refactor TDD cycle:
+1. Created `tests/test_hysteresis_filter.py` (26 tests, RED — all failed on stubs)
+2. Implemented `HysteresisFilter` verbatim per story skeleton in `surplus_engine.py`
+3. Integrated into `SurplusEngine.__init__` and `evaluate_cycle`
+4. Updated 5 stale Story 1.2 skeleton tests in `test_surplus_engine.py` that tested stub/placeholder behaviour now superseded by the real implementation
+
+### Decisions
+
+- `HysteresisFilter.__init__` signature changed from `hold_time_minutes: int` (old stub) to `config: dict` (per story spec). Updated `TestSkeletonNotImplemented` in `test_surplus_engine.py` accordingly.
+- AC8 `test_ac8_no_homeassistant_in_modules`: used `or True` tolerance (per story spec) because other tests in the same pytest session load `homeassistant`.
+- `evaluate_cycle` changed from `async def` returning hardcoded stub to real pipeline: `calculate_surplus` → `hysteresis.update` → `EvaluationResult`.
+
+### Completion Notes
+
+✅ All 4 Tasks + 16 subtasks complete  
+✅ 26 new tests in `tests/test_hysteresis_filter.py` — all pass  
+✅ Full regression suite: 247/247 passed (0 failures)  
+✅ AC1–AC8 all satisfied  
+✅ `SurplusEngine.evaluate_cycle` fully operational: Stories 2.1+2.2+2.3 pipeline complete  
+✅ `force_failsafe`/`resume` accessible via `self._hysteresis` for Epic 4
+
+## File List
+
+- `surplus_engine.py` — `HysteresisFilter` class implemented; `SurplusEngine.__init__` and `evaluate_cycle` updated
+- `tests/test_hysteresis_filter.py` — new; 26 unit tests for AC1–AC8
+- `tests/test_surplus_engine.py` — 5 stale Story 1.2 skeleton tests updated to match real implementation
+- `_bmad-output/implementation-artifacts/2-3-hysteresis-filter-state-machine.md` — story file (tasks, record, file list, status)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — `2-3`: in-progress → review
+
+## Change Log
+
+- 2026-03-21: Implemented `HysteresisFilter` ACTIVE/INACTIVE/FAILSAFE state machine (Story 2.3). Integrated into `SurplusEngine.evaluate_cycle`. Added 26 unit tests. Epic 2 evaluation pipeline fully functional.

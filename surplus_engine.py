@@ -199,22 +199,62 @@ class SurplusCalculator:
 # ---------------------------------------------------------------------------
 
 class HysteresisFilter:
-    """Applies hold-time hysteresis to the surplus signal. (Story 2.3)"""
+    """ACTIVE/INACTIVE/FAILSAFE state machine for wallbox charge signal stabilisation.
 
-    def __init__(self, hold_time_minutes: int) -> None:
-        pass
+    HA-free: only stdlib datetime — fully unit-testable without HA runtime.
+    """
+
+    def __init__(self, config: dict) -> None:
+        self._state: str = "INACTIVE"
+        self._hold_until: datetime | None = None
+        self._last_reported_kw: float = 0.0
+        self._hold_time_minutes: int = config.get("hold_time_minutes", 10)
+        self._wallbox_threshold_kw: float = config.get("wallbox_threshold_kw", 4.2)
+
+    @property
+    def state(self) -> str:
+        return self._state
 
     def update(self, reported_kw: float, now: datetime) -> float:
-        """Apply hysteresis and return filtered surplus. (Story 2.3)"""
-        raise NotImplementedError
+        """Apply hysteresis and return filtered surplus kW. (Story 2.3)"""
+        if self._state == "FAILSAFE":
+            return 0.0
+
+        if self._state == "INACTIVE":
+            if reported_kw >= self._wallbox_threshold_kw:
+                self._state = "ACTIVE"
+                self._hold_until = now + timedelta(minutes=self._hold_time_minutes)
+                self._last_reported_kw = reported_kw
+                return reported_kw
+            return 0.0
+
+        # ACTIVE branch
+        if reported_kw >= self._wallbox_threshold_kw:
+            # Renew hold
+            self._hold_until = now + timedelta(minutes=self._hold_time_minutes)
+            self._last_reported_kw = reported_kw
+            return reported_kw
+
+        # Below threshold: check hold
+        if self._hold_until is not None and now < self._hold_until:
+            # Still within hold period — return last valid value
+            return self._last_reported_kw
+
+        # Hold expired
+        self._state = "INACTIVE"
+        self._hold_until = None
+        return 0.0
 
     def force_failsafe(self, reason: str) -> None:
-        """Immediately enter FAILSAFE state. (Story 4.x)"""
-        raise NotImplementedError
+        """Immediately enter FAILSAFE state. (Story 2.3 / Story 4.x)"""
+        _LOGGER.warning("SDM630 HysteresisFilter → FAILSAFE: %s", reason)
+        self._state = "FAILSAFE"
+        self._hold_until = None
+        self._last_reported_kw = 0.0
 
     def resume(self) -> None:
-        """Exit FAILSAFE and return to normal evaluation. (Story 4.x)"""
-        raise NotImplementedError
+        """Exit FAILSAFE → INACTIVE. Call only after all sensors confirmed healthy."""
+        self._state = "INACTIVE"
 
 
 class ForecastConsumer:
@@ -233,20 +273,34 @@ class SurplusEngine:
 
     def __init__(self, config: dict) -> None:
         self.config = config
+        self._calculator = SurplusCalculator(config)
+        self._hysteresis = HysteresisFilter(config)
 
     async def evaluate_cycle(self, snapshot: SensorSnapshot) -> EvaluationResult:
-        """Run one evaluation cycle and return result.
+        """Run one evaluation cycle and return result."""
+        # 1. Pure calculation (Stories 2.1 + 2.2)
+        calc = self._calculator.calculate_surplus(snapshot)
 
-        Returns a safe default EvaluationResult until Story 2 implements
-        real logic. Must be ``async def`` — Story 3 will await get_forecast.
-        """
+        # 2. Apply hysteresis filter (Story 2.3)
+        final_kw = self._hysteresis.update(calc.reported_kw, snapshot.timestamp)
+
+        # 3. Determine reason and charging state
+        charging_state = self._hysteresis.state
+        if charging_state == "FAILSAFE":
+            reason = "failsafe_active"
+            final_kw = 0.0
+        elif final_kw > 0.0:
+            reason = calc.reason
+        else:
+            reason = "hysteresis_hold_or_inactive"
+
         return EvaluationResult(
-            reported_kw=0.0,
-            real_surplus_kw=0.0,
-            buffer_used_kw=0.0,
-            soc_percent=0.0,
-            soc_floor_active=50,
-            charging_state="INACTIVE",
-            reason="engine_not_yet_implemented",
-            forecast_available=False,
+            reported_kw=final_kw,
+            real_surplus_kw=calc.real_surplus_kw,
+            buffer_used_kw=calc.buffer_used_kw,
+            soc_percent=calc.soc_percent,
+            soc_floor_active=calc.soc_floor_active,
+            charging_state=charging_state,
+            reason=reason,
+            forecast_available=calc.forecast_available,
         )
