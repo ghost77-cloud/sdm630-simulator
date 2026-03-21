@@ -1,6 +1,6 @@
 # Story 1.3: Integration Wiring in `sensor.py` and Evaluation Loop
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -79,44 +79,43 @@ And `async_track_state_change_event` unsubscribes cleanly
 
 ## Tasks / Subtasks
 
-- [ ] Extend `sensor.py`: constructor accepts `config` dict (AC: #1)
-  - [ ] `__init__(self, name, hass, config)` — store `self._config = config`
-  - [ ] Initialize `self._sensor_cache: dict = {}`
-  - [ ] Initialize `self._engine: SurplusEngine | None = None`
-  - [ ] Initialize `self._first_tick: bool = True` (for startup log)
-- [ ] Implement `async_added_to_hass()` wiring (AC: #1)
-  - [ ] Create `SurplusEngine(self._config)` and assign to `self._engine`
-  - [ ] Build `entity_ids` list from `config[CONF_ENTITIES]` for numeric
+- [x] Extend `sensor.py`: constructor accepts `config` dict (AC: #1)
+  - [x] `__init__(self, name, hass, config)` — store `self._config = config`
+  - [x] Initialize `self._sensor_cache: dict = {}`
+  - [x] Initialize `self._engine: SurplusEngine | None = None`
+  - [x] Initialize `self._first_tick: bool = True` (for startup log)
+- [x] Implement `async_added_to_hass()` wiring (AC: #1)
+  - [x] Create `SurplusEngine(self._config)` and assign to `self._engine`
+  - [x] Build `entity_ids` list from `config[CONF_ENTITIES]` for numeric
     sensors (soc, power_to_grid, pv_production, power_to_user — exclude sun,
     weather, forecast_solar which are NOT numeric state subscriptions)
-  - [ ] Subscribe to state changes: `async_track_state_change_event` → `async_on_remove`
-  - [ ] Start evaluation loop: `async_track_time_interval` → `async_on_remove`
-- [ ] Implement `_handle_state_change(event)` (AC: #2)
-  - [ ] Extract `new_state = event.data.get("new_state")`
-  - [ ] Guard: if `new_state is None` return
-  - [ ] Guard: if `new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)` return
-  - [ ] Identify entity_id → cache key using `ENTITY_TO_CACHE_KEY` mapping dict
-  - [ ] Store `float(new_state.state)` in `self._sensor_cache[cache_key]`
-  - [ ] Handle `ValueError`/`TypeError` with `_LOGGER.debug`
-- [ ] Implement `async def _evaluation_tick(self, now)` (AC: #3, #4, #5)
-  - [ ] Emit startup INFO log on first tick, then set `self._first_tick = False`
-  - [ ] Read numeric values from `self._sensor_cache` with `.get()` and `0.0` defaults
-  - [ ] Read `sun.sun` state via `hass.states.get("sun.sun")` and parse times
-  - [ ] Build `SensorSnapshot(...)` with all fields
-  - [ ] `result = await self._engine.evaluate_cycle(snapshot)`
-  - [ ] `input_data_block.set_float(TOTAL_POWER, result.reported_kw)`
-  - [ ] `self._attr_native_value = result.reported_kw` + `self.async_write_ha_state()`
-- [ ] Update `async_setup_platform` to pass config to sensor (AC: #1)
-  - [ ] `SDM630SimSensor(name, hass, config)` — add config argument
-  - [ ] `start_modbus_server()` call stays unchanged
-- [ ] Add imports to `sensor.py` (AC: #1, #4)
-  - [ ] `from homeassistant.helpers.event import async_track_time_interval`
+  - [x] Subscribe to state changes: `async_track_state_change_event` → `async_on_remove`
+  - [x] Start evaluation loop: `async_track_time_interval` → `async_on_remove`
+- [x] Implement `_handle_state_change(event)` (AC: #2)
+  - [x] Extract `new_state = event.data.get("new_state")`
+  - [x] Guard: if `new_state is None` return
+  - [x] Guard: if `new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN)` return
+  - [x] Identify entity_id → cache key using `ENTITY_TO_CACHE_KEY` mapping dict
+  - [x] Store `float(new_state.state)` in `self._sensor_cache[cache_key]`
+  - [x] Handle `ValueError`/`TypeError` with `_LOGGER.debug`
+- [x] Implement `async def _evaluation_tick(self, now)` (AC: #3, #4, #5)
+  - [x] Emit startup INFO log on first tick, then set `self._first_tick = False`
+  - [x] Read numeric values from `self._sensor_cache` with `.get()` and `0.0` defaults
+  - [x] Read `sun.sun` state via `hass.states.get("sun.sun")` and parse times
+  - [x] Build `SensorSnapshot(...)` with all fields
+  - [x] `result = await self._engine.evaluate_cycle(snapshot)`
+  - [x] `input_data_block.set_float(TOTAL_POWER, result.reported_kw)`
+  - [x] `self._attr_native_value = result.reported_kw` + `self.async_write_ha_state()`
+- [x] Update `async_setup_platform` to pass config to sensor (AC: #1)
+  - [x] `SDM630SimSensor(name, hass, config)` — add config argument
+  - [x] `start_modbus_server()` call stays unchanged
+- [x] Add imports to `sensor.py` (AC: #1, #4)
+  - [x] `from homeassistant.helpers.event import async_track_time_interval`
     (already has `async_track_state_change_event`)
-  - [ ] `from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN`
-  - [ ] `from homeassistant import util as dt_util` OR
-    `from homeassistant.util import dt as dt_util`
-  - [ ] `from datetime import timedelta` (already present)
-  - [ ] `from .surplus_engine import SurplusEngine, SensorSnapshot`
+  - [x] `from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN`
+  - [x] `from homeassistant.util import dt as dt_util`
+  - [x] `from datetime import timedelta` (already present)
+  - [x] `from .surplus_engine import SurplusEngine, SensorSnapshot`
 
 ## Dev Notes
 
@@ -358,10 +357,21 @@ custom_components/sdm630_simulator/
 
 ### Agent Model Used
 
-_to be filled by dev agent_
+Claude Sonnet 4.6 (GitHub Copilot)
 
 ### Debug Log References
 
+- `async_add_entities` is synchronous in HA; fixed test accordingly.
+- `CACHE_KEY_*` constants were missing from `surplus_engine.py` (not added in Story 1.2); added as part of this story.
+
 ### Completion Notes List
 
+- Added `CACHE_KEY_SOC`, `CACHE_KEY_POWER_TO_GRID`, `CACHE_KEY_PV_PRODUCTION`, `CACHE_KEY_POWER_TO_USER`, `CACHE_KEY_BATTERY_DISCHARGE` constants to `surplus_engine.py`.
+- Rewrote `sensor.py`: config-aware constructor, `async_added_to_hass` wiring (SurplusEngine, state subscriptions, timer loop), cache-only `_handle_state_change`, full `_evaluation_tick` with sun.sun boundary time parsing and Modbus write.
+- All 36 new tests pass; full regression suite 152/152 green.
+
 ### File List
+
+- surplus_engine.py (added CACHE_KEY_* constants)
+- sensor.py (full rewrite per story tasks)
+- tests/test_sensor.py (new — 36 tests covering AC1–AC6)

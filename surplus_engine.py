@@ -18,6 +18,13 @@ _LOGGER = logging.getLogger(__name__)
 
 SOC_HARD_FLOOR: int = 50
 
+# Cache key constants — map entity roles in sensor cache (used by sensor.py)
+CACHE_KEY_SOC               = "soc_percent"
+CACHE_KEY_POWER_TO_GRID     = "power_to_grid_w"
+CACHE_KEY_PV_PRODUCTION     = "pv_production_w"
+CACHE_KEY_POWER_TO_USER     = "power_to_user_w"
+CACHE_KEY_BATTERY_DISCHARGE = "battery_discharge_w"
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
