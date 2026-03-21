@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-03-21T00:00:00"
-last_updated: "2026-03-21T00:00:00"
+last_updated: "2026-03-21T12:00:00"
 project: sdm630-simulator
 project_key: NOKEY
 tracking_system: file-system
@@ -72,7 +72,7 @@ development_status:
   epic-4-retrospective: optional
 
   # Epic 5: Test Infrastructure — Unit Tests for Pure Logic Components
-  epic-5: backlog
-  5-1-test-infrastructure-setup-and-surpluscalculator-tests: backlog
-  5-2-hysteresisfilter-state-machine-tests: backlog
+  epic-5: in-progress
+  5-1-test-infrastructure-setup-and-surpluscalculator-tests: ready-for-dev
+  5-2-hysteresisfilter-state-machine-tests: ready-for-dev
   epic-5-retrospective: optional
