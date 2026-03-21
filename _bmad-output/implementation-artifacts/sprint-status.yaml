@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-03-21T00:00:00"
-last_updated: "2026-03-21T13:00:00"
+last_updated: "2026-03-21T14:00:00"
 project: sdm630-simulator
 project_key: NOKEY
 tracking_system: file-system
@@ -54,13 +54,13 @@ development_status:
   epic-2: in-progress
   2-1-soc-floor-determination-via-time-window-strategy: ready-for-dev
   2-2-surplus-calculation-with-battery-buffer: ready-for-dev
-  2-3-hysteresis-filter-state-machine: backlog
+  2-3-hysteresis-filter-state-machine: ready-for-dev
   epic-2-retrospective: optional
 
   # Epic 3: Forecast Integration — Weather and Solar Forecast Consumption
-  epic-3: backlog
-  3-1-forecast-data-fetching-and-parsing: backlog
-  3-2-forecast-driven-soc-target-adjustment: backlog
+  epic-3: in-progress
+  3-1-forecast-data-fetching-and-parsing: ready-for-dev
+  3-2-forecast-driven-soc-target-adjustment: ready-for-dev
   epic-3-retrospective: optional
 
   # Epic 4: Fail-Safe and Reliability — Sensor Monitoring and Fault Handling
