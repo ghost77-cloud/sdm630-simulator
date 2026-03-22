@@ -1,6 +1,6 @@
 # Story 8.1: Create Lovelace Card YAML with Conditional Orange State
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -48,15 +48,15 @@ and `entities` built-in card types are used
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create `docs/lovelace-wallbox-card.yaml` (AC: #1, #2, #3, #4, #5)
-  - [ ] 1.1 Create file with a top-level comment block explaining the card, its sensors,
+- [x] Task 1: Create `docs/lovelace-wallbox-card.yaml` (AC: #1, #2, #3, #4, #5)
+  - [x] 1.1 Create file with a top-level comment block explaining the card, its sensors,
     the warning threshold, and how to change it
-  - [ ] 1.2 Add the `off`-state `conditional` card block (normal variant):
+  - [x] 1.2 Add the `off`-state `conditional` card block (normal variant):
     title "Wallbox Charging", three entity rows
-  - [ ] 1.3 Add the `on`-state `conditional` card block (warning variant):
+  - [x] 1.3 Add the `on`-state `conditional` card block (warning variant):
     title "Wallbox Charging ⚠", same three entity rows with a warning comment
-  - [ ] 1.4 Verify correct inline `condition` syntax for HA 2024.x+ (`condition: state`)
-  - [ ] 1.5 Add inline comments explaining each section
+  - [x] 1.4 Verify correct inline `condition` syntax for HA 2024.x+ (`condition: state`)
+  - [x] 1.5 Add inline comments explaining each section
 
 ## Dev Notes
 
@@ -216,6 +216,23 @@ Claude Sonnet 4.6
 
 ### Debug Log References
 
+_No debug issues encountered._
+
 ### Completion Notes List
 
+- Created `docs/lovelace-wallbox-card.yaml` with full comment header, two `conditional`
+  card blocks (normal and warning states), and inline YAML comments per all ACs.
+- Used `condition: state` syntax (HA 2023.9+) as specified in Dev Notes.
+- No Python code changes. No HACS cards. Only built-in `conditional`/`entities` types.
+- All four required entities documented in comment header with story references.
+- Threshold change instructions in comment header (AC4 / NFR8 compliant).
+- Subtasks 1.1–1.5 all satisfied in a single file creation.
+
 ### File List
+
+- `docs/lovelace-wallbox-card.yaml` (created)
+
+## Change Log
+
+- 2026-03-22: Created `docs/lovelace-wallbox-card.yaml` — Lovelace card YAML with
+  conditional normal/warning states for wallbox dashboard (Story 8-1)
