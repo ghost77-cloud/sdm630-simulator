@@ -1,6 +1,6 @@
 # Story 7.1: Add Last-Poll Timestamp Sensor and Modbus Hook
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -43,25 +43,25 @@ server continues responding normally (NFR4, NFR5)
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `SDM630WallboxLastPollSensor` class to `sensor.py` (AC: #1, #2, #3, #4)
-  - [ ] 1.1 Add class extending `RestoreSensor`
-  - [ ] 1.2 Set `_attr_should_poll = False`
-  - [ ] 1.3 Set `_attr_device_class = SensorDeviceClass.TIMESTAMP`
-  - [ ] 1.4 Set `_attr_unique_id = "sdm_wallbox_last_poll"`
-  - [ ] 1.5 Set `_attr_name = "SDM Wallbox Last Poll"`
-  - [ ] 1.6 Implement `async_added_to_hass` restoring last `datetime` via `async_get_last_sensor_data()`
-  - [ ] 1.7 Add `on_poll` method decorated with `@callback`, recording `dt_util.utcnow()` and calling `async_write_ha_state()`
-  - [ ] 1.8 Wrap `on_poll` body in `try/except`, logging failures via `_LOGGER.warning()`
-- [ ] Task 2: Add poll-callback mechanism to `SDM630DataBlock` in `modbus_server.py` (AC: #1, #2, #4)
-  - [ ] 2.1 Add `self._poll_callback: Callable | None = None` to `__init__`
-  - [ ] 2.2 Add `set_poll_callback(cb: Callable) -> None` public method
-  - [ ] 2.3 Override `getValues(address, count)` — call `super().getValues(...)` first, then invoke `self._poll_callback()` if set, return the super result
-  - [ ] 2.4 Wrap `_poll_callback` invocation in `try/except`, logging via `_LOGGER.warning()`
-  - [ ] 2.5 Add `Callable` to imports (`from typing import Callable`)
-- [ ] Task 3: Wire sensor and callback in `async_setup_platform` in `sensor.py` (AC: #1, #3)
-  - [ ] 3.1 Instantiate `SDM630WallboxLastPollSensor` in `async_setup_platform`
-  - [ ] 3.2 Register the callback: `input_data_block.set_poll_callback(wallbox_last_poll_sensor.on_poll)`
-  - [ ] 3.3 Pass `wallbox_last_poll_sensor` to `async_add_entities` together with existing sensors
+- [x] Task 1: Add `SDM630WallboxLastPollSensor` class to `sensor.py` (AC: #1, #2, #3, #4)
+  - [x] 1.1 Add class extending `RestoreSensor`
+  - [x] 1.2 Set `_attr_should_poll = False`
+  - [x] 1.3 Set `_attr_device_class = SensorDeviceClass.TIMESTAMP`
+  - [x] 1.4 Set `_attr_unique_id = "sdm_wallbox_last_poll"`
+  - [x] 1.5 Set `_attr_name = "SDM Wallbox Last Poll"`
+  - [x] 1.6 Implement `async_added_to_hass` restoring last `datetime` via `async_get_last_sensor_data()`
+  - [x] 1.7 Add `on_poll` method decorated with `@callback`, recording `dt_util.utcnow()` and calling `async_write_ha_state()`
+  - [x] 1.8 Wrap `on_poll` body in `try/except`, logging failures via `_LOGGER.warning()`
+- [x] Task 2: Add poll-callback mechanism to `SDM630DataBlock` in `modbus_server.py` (AC: #1, #2, #4)
+  - [x] 2.1 Add `self._poll_callback: Callable | None = None` to `__init__`
+  - [x] 2.2 Add `set_poll_callback(cb: Callable) -> None` public method
+  - [x] 2.3 Override `getValues(address, count)` — call `super().getValues(...)` first, then invoke `self._poll_callback()` if set, return the super result
+  - [x] 2.4 Wrap `_poll_callback` invocation in `try/except`, logging via `_LOGGER.warning()`
+  - [x] 2.5 Add `Callable` to imports (`from typing import Callable`)
+- [x] Task 3: Wire sensor and callback in `async_setup_platform` in `sensor.py` (AC: #1, #3)
+  - [x] 3.1 Instantiate `SDM630WallboxLastPollSensor` in `async_setup_platform`
+  - [x] 3.2 Register the callback: `input_data_block.set_poll_callback(wallbox_last_poll_sensor.on_poll)`
+  - [x] 3.3 Pass `wallbox_last_poll_sensor` to `async_add_entities` together with existing sensors
 
 ## Dev Notes
 
@@ -261,6 +261,19 @@ Claude Sonnet 4.6
 
 ### Debug Log References
 
+None — implementation matched story spec exactly; no rework required.
+
 ### Completion Notes List
 
+- All tasks implemented in exactly two files: `sensor.py` and `modbus_server.py`.
+- `RestoreSensor`, `SensorDeviceClass`, `@callback`, `dt_util` were already imported — no new top-level imports needed in `sensor.py`.
+- `from typing import Callable` added to `modbus_server.py`.
+- `async_add_entities` call extended from 3 to 4 entities; existing test `test_setup_platform_passes_config_to_sensor` updated accordingly (count + type assertion for `SDM630WallboxLastPollSensor`).
+- **Code-Review Fix (B1):** `setValues()` in `SDM630DataBlock` rief `self.getValues()` auf, was nach dem neuen `getValues`-Override spurious den Poll-Callback triggerte. Gefixt durch Wechsel auf `super().getValues()` — Callback feuert nur noch bei echten Modbus-Reads.
+- 363/363 tests pass.
+
 ### File List
+
+- `sensor.py` — added `SDM630WallboxLastPollSensor` class; updated `async_setup_platform` wiring
+- `modbus_server.py` — added `Callable` import; added `_poll_callback` slot, `set_poll_callback`, `getValues` override to `SDM630DataBlock`
+- `tests/test_sensor.py` — updated `TestSetupPlatform::test_setup_platform_passes_config_to_sensor` (entity count 3→4, added `SDM630WallboxLastPollSensor` assertion)

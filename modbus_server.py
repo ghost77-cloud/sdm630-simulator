@@ -7,6 +7,7 @@ from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock, Modbu
 from pymodbus.device import ModbusDeviceIdentification
 import struct
 import logging
+from typing import Callable
 
 # Determine if we're running as a package (Home Assistant component) or standalone
 if __package__ is None or __package__ == '':
@@ -31,7 +32,22 @@ class SDM630DataBlock(ModbusSparseDataBlock):
     def __init__(self, registers : SDM630Registers):
         super().__init__()
         self.registers = registers
+        self._poll_callback: Callable | None = None
         self._float_map_to_regs()
+
+    def set_poll_callback(self, cb: Callable) -> None:
+        """Register a callback invoked on every Modbus read (getValues)."""
+        self._poll_callback = cb
+
+    def getValues(self, address, count=1):
+        """Override to fire poll callback after assembling Modbus response."""
+        values = super().getValues(address, count)
+        if self._poll_callback is not None:
+            try:
+                self._poll_callback()
+            except Exception:  # noqa: BLE001
+                _LOGGER.warning("SDM630DataBlock poll callback failed", exc_info=True)
+        return values
 
     def _float_map_to_regs(self):
         for register in self.registers.get_all():
@@ -48,8 +64,9 @@ class SDM630DataBlock(ModbusSparseDataBlock):
         # Check if this is the first or second register of a float pair
         if address % 2 == 1:  # Odd address - potential start of float
             # Try to get both registers to form the float
-            reg1 = self.getValues(address, 1)[0]
-            reg2 = self.getValues(address + 1, 1)[0]
+            # Use super().getValues() to avoid triggering the poll callback
+            reg1 = super().getValues(address, 1)[0]
+            reg2 = super().getValues(address + 1, 1)[0]
             # Convert the two registers back to float
             try:
                 float_value = struct.unpack('>f', struct.pack('>HH', reg1, reg2))[0]

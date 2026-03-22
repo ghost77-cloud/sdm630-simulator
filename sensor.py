@@ -73,10 +73,13 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     raw_surplus_sensor = SDM630RawSurplusSensor()
     reported_surplus_sensor = SDM630ReportedSurplusSensor()
+    wallbox_last_poll_sensor = SDM630WallboxLastPollSensor()
+    input_data_block.set_poll_callback(wallbox_last_poll_sensor.on_poll)
+
     sensor = SDM630SimSensor(name, hass, config)
     sensor.set_surplus_sensors(raw_surplus_sensor, reported_surplus_sensor)
 
-    async_add_entities([sensor, raw_surplus_sensor, reported_surplus_sensor])
+    async_add_entities([sensor, raw_surplus_sensor, reported_surplus_sensor, wallbox_last_poll_sensor])
 
 
 class SDM630RawSurplusSensor(RestoreSensor):
@@ -135,6 +138,37 @@ class SDM630ReportedSurplusSensor(RestoreSensor):
         """Push a new surplus value (in W) — non-blocking, called from evaluation tick."""
         self._attr_native_value = round(value_w, 1)
         self.async_write_ha_state()
+
+
+class SDM630WallboxLastPollSensor(RestoreSensor):
+    """Sensor recording the UTC datetime of the last Modbus FC04 poll from the wallbox."""
+
+    _attr_should_poll = False
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self) -> None:
+        self._attr_name = "SDM Wallbox Last Poll"
+        self._attr_unique_id = "sdm_wallbox_last_poll"
+        self._attr_native_value = None  # datetime | None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_data = await self.async_get_last_sensor_data()
+        if last_data and last_data.native_value is not None:
+            val = last_data.native_value
+            if isinstance(val, str):
+                val = dt_util.parse_datetime(val)
+            self._attr_native_value = val
+
+    @callback
+    def on_poll(self) -> None:
+        """Called by Modbus poll hook — runs in HA event loop, must be non-blocking."""
+        try:
+            self._attr_native_value = dt_util.utcnow()
+            self.async_write_ha_state()
+            _LOGGER.debug("SDM Wallbox last poll updated: %s", self._attr_native_value)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Failed to update sdm_wallbox_last_poll sensor", exc_info=True)
 
 
 class SDM630SimSensor(SensorEntity):
