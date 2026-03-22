@@ -24,7 +24,7 @@ from .modbus_server import (
     input_data_block,
 )
 from .sdm630_input_registers import TOTAL_POWER
-from . import CONF_ENTITIES, DEFAULTS
+from . import CONF_ENTITIES, DEFAULTS, DOMAIN
 from .surplus_engine import (
     SurplusEngine,
     SensorSnapshot,
@@ -74,7 +74,12 @@ async def start_modbus_server():
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the SDM630 simulated sensor."""
-    name = config.get(CONF_NAME, DEFAULT_NAME)
+    # The component config (with entities, thresholds etc.) is stored in
+    # hass.data[DOMAIN] by __init__.py. The `config` argument here is the
+    # platform config which is empty when loaded via async_load_platform.
+    component_cfg = hass.data.get(DOMAIN, {}).get("config", config)
+
+    name = component_cfg.get(CONF_NAME, DEFAULT_NAME)
     hass.loop.create_task(start_modbus_server())
 
     raw_surplus_sensor = SDM630RawSurplusSensor()
@@ -84,7 +89,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     wallbox_last_poll_sensor.set_warning_sensor(poll_warning_sensor)
     input_data_block.set_poll_callback(wallbox_last_poll_sensor.on_poll)
 
-    sensor = SDM630SimSensor(name, hass, config)
+    sensor = SDM630SimSensor(name, hass, component_cfg)
     sensor.set_surplus_sensors(raw_surplus_sensor, reported_surplus_sensor)
 
     async_add_entities([

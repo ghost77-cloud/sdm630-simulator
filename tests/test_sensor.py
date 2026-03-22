@@ -866,17 +866,19 @@ class TestStartupLog:
 
 class TestSetupPlatform:
     def test_setup_platform_passes_config_to_sensor(self, sensor_ctx, sample_config):
-        """async_setup_platform must instantiate SDM630SimSensor with config arg."""
+        """async_setup_platform must instantiate SDM630SimSensor with component config."""
         mod, mocks = sensor_ctx
         mock_hass = MagicMock()
         mock_hass.loop = MagicMock()
         mock_hass.loop.create_task = MagicMock()
+        # Simulate how __init__.py stores the config in hass.data
+        mock_hass.data = {mod.DOMAIN: {"config": sample_config}}
         added_entities = []
 
         def _add(entities):
             added_entities.extend(entities)
 
-        asyncio.run(mod.async_setup_platform(mock_hass, sample_config, _add))
+        asyncio.run(mod.async_setup_platform(mock_hass, {}, _add))
         assert len(added_entities) == 5
         sensor = added_entities[0]
         assert isinstance(sensor, mod.SDM630SimSensor)
