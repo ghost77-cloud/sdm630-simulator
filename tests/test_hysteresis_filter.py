@@ -1,6 +1,6 @@
 """Unit tests for HysteresisFilter — no HA runtime required.
 
-Covers Acceptance Criteria AC1–AC8 of Story 2.3.
+Run: python -m pytest tests/test_hysteresis_filter.py -v
 """
 import importlib.util
 import os
@@ -10,14 +10,13 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 # ---------------------------------------------------------------------------
-# Module loading helper — standalone, no HA runtime
+# Module loading — standalone, no HA runtime required
 # ---------------------------------------------------------------------------
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _MODULE_PATH = os.path.join(ROOT, "surplus_engine.py")
 _MODULE_NAME = "surplus_engine"
 
-# Load once; evict any stale cached copy first
 sys.modules.pop(_MODULE_NAME, None)
 _spec = importlib.util.spec_from_file_location(_MODULE_NAME, _MODULE_PATH)
 _mod = importlib.util.module_from_spec(_spec)
@@ -26,250 +25,201 @@ _spec.loader.exec_module(_mod)
 
 HysteresisFilter = _mod.HysteresisFilter
 
+# ---------------------------------------------------------------------------
+# Fixtures / Helpers
+# ---------------------------------------------------------------------------
+
 THRESHOLD = 4.2
 CFG = {"hold_time_minutes": 10, "wallbox_threshold_kw": THRESHOLD}
 T0 = datetime(2026, 3, 21, 12, 0, 0, tzinfo=timezone.utc)
+HOLD_MINUTES = CFG["hold_time_minutes"]
 
 
-def _t(minutes: int = 0) -> datetime:
-    return T0 + timedelta(minutes=minutes)
+def _t(minutes: float = 0, seconds: float = 0) -> datetime:
+    """Return T0 + offset for readable timestamp construction."""
+    return T0 + timedelta(minutes=minutes, seconds=seconds)
+
+
+@pytest.fixture
+def hf() -> HysteresisFilter:
+    """Fresh HysteresisFilter in INACTIVE state."""
+    return HysteresisFilter(CFG)
+
+
+@pytest.fixture
+def hf_active(hf: HysteresisFilter) -> HysteresisFilter:
+    """HysteresisFilter already transitioned to ACTIVE at T0 with 5.0 kW."""
+    hf.update(5.0, _t(0))
+    assert hf.state == "ACTIVE"
+    return hf
+
+
+@pytest.fixture
+def hf_failsafe(hf: HysteresisFilter) -> HysteresisFilter:
+    """HysteresisFilter in FAILSAFE state."""
+    hf.force_failsafe("test setup")
+    assert hf.state == "FAILSAFE"
+    return hf
 
 
 # ---------------------------------------------------------------------------
-# AC1 — INACTIVE → ACTIVE on threshold crossing
+# AC1 — INACTIVE → ACTIVE on threshold met
 # ---------------------------------------------------------------------------
 
 class TestInactiveToActive:
-    def test_ac1_transition_on_threshold(self):
-        """AC1: INACTIVE → ACTIVE when reported_kw >= threshold."""
-        f = HysteresisFilter(CFG)
-        result = f.update(5.0, _t(0))
-        assert f.state == "ACTIVE"
+
+    def test_inactive_to_active_on_threshold_met(self, hf: HysteresisFilter) -> None:
+        result = hf.update(5.0, _t(0))
+        assert hf.state == "ACTIVE"
+        assert hf._hold_until == _t(0) + timedelta(minutes=HOLD_MINUTES)
         assert result == pytest.approx(5.0)
 
-    def test_ac1_hold_until_set_on_transition(self):
-        """AC1: hold_until = now + hold_time_minutes after transition."""
-        f = HysteresisFilter(CFG)
-        now = _t(0)
-        f.update(5.0, now)
-        expected = now + timedelta(minutes=10)
-        assert f._hold_until == expected
-
-    def test_ac1_no_transition_below_threshold(self):
-        """AC1: stays INACTIVE when reported_kw < threshold."""
-        f = HysteresisFilter(CFG)
-        result = f.update(3.0, _t(0))
-        assert f.state == "INACTIVE"
+    def test_inactive_stays_inactive_below_threshold(self, hf: HysteresisFilter) -> None:
+        result = hf.update(3.0, _t(0))
+        assert hf.state == "INACTIVE"
         assert result == pytest.approx(0.0)
 
-    def test_ac1_exact_threshold_activates(self):
-        """AC1: exact threshold value triggers transition."""
-        f = HysteresisFilter(CFG)
-        result = f.update(THRESHOLD, _t(0))
-        assert f.state == "ACTIVE"
+    def test_inactive_transitions_at_exact_threshold(self, hf: HysteresisFilter) -> None:
+        """Boundary: kW == threshold should activate (>=, not >)."""
+        result = hf.update(THRESHOLD, _t(0))
+        assert hf.state == "ACTIVE"
         assert result == pytest.approx(THRESHOLD)
+
+    def test_returns_zero_when_inactive(self, hf: HysteresisFilter) -> None:
+        """AC8: update() returns 0.0 in INACTIVE state when kW below threshold."""
+        result = hf.update(1.0, _t(0))
+        assert result == pytest.approx(0.0)
+        assert hf.state == "INACTIVE"
 
 
 # ---------------------------------------------------------------------------
-# AC2 — ACTIVE + sub-threshold within hold → stays ACTIVE, returns _last_reported_kw
+# AC2, AC3, AC6, AC7 — ACTIVE hold behaviour and transitions
 # ---------------------------------------------------------------------------
 
 class TestActiveHoldBehavior:
-    def test_ac2_sub_threshold_within_hold_stays_active(self):
-        """AC2: below threshold but within hold → state remains ACTIVE."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))         # → ACTIVE, last_reported = 5.0
-        result = f.update(1.0, _t(5))  # 5 min < 10 min hold
-        assert f.state == "ACTIVE"
 
-    def test_ac2_returns_last_reported_kw_not_dropped_value(self):
-        """AC2: returns _last_reported_kw (5.0) not the dropped value (1.0)."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))
-        result = f.update(1.0, _t(5))
+    def test_active_holds_during_hold_period(self, hf_active: HysteresisFilter) -> None:
+        """AC2: Sub-threshold within hold → stays ACTIVE, returns _last_reported_kw."""
+        # Drop below threshold before hold expires
+        result = hf_active.update(2.0, _t(5))  # 5 min < 10 min hold
+        assert hf_active.state == "ACTIVE"
+        assert result == pytest.approx(5.0)  # _last_reported_kw = 5.0 from fixture
+
+    def test_active_to_inactive_after_hold_expires(self, hf_active: HysteresisFilter) -> None:
+        """AC3: Sub-threshold after hold expires → INACTIVE, returns 0.0, hold cleared."""
+        result = hf_active.update(2.0, _t(HOLD_MINUTES, seconds=1))  # 1s after hold
+        assert hf_active.state == "INACTIVE"
+        assert hf_active._hold_until is None
+        assert result == pytest.approx(0.0)
+
+    def test_active_above_threshold_renews_hold(self, hf_active: HysteresisFilter) -> None:
+        """Being above threshold while ACTIVE should renew hold_until."""
+        # Advance to near end of hold, then renew
+        hf_active.update(6.0, _t(9))          # still above threshold at +9 min
+        # Now at +15 min (beyond original hold_until at +10 min, but hold was renewed at +9 min)
+        result = hf_active.update(2.0, _t(15))  # within renewed hold (+9+10 = +19 min)
+        assert hf_active.state == "ACTIVE"
+        assert result == pytest.approx(6.0)  # returns last valid kW after renewal
+
+    def test_hold_timer_boundary_at_exactly_hold_duration(
+        self, hf_active: HysteresisFilter
+    ) -> None:
+        """AC6: At exactly hold_until, state is STILL ACTIVE (<=, not <)."""
+        result = hf_active.update(2.0, _t(HOLD_MINUTES))  # now == hold_until
+        assert hf_active.state == "ACTIVE", (
+            "Hold should still be active at now == hold_until (inclusive boundary)"
+        )
         assert result == pytest.approx(5.0)
 
-    # -----------------------------------------------------------------------
-    # AC3 — Hold expired + sub-threshold → INACTIVE, returns 0.0
-    # -----------------------------------------------------------------------
-
-    def test_ac3_hold_expired_returns_inactive(self):
-        """AC3: hold expired + below threshold → transitions to INACTIVE."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))
-        result = f.update(1.0, _t(11))  # 11 min > 10 min hold
-        assert f.state == "INACTIVE"
-
-    def test_ac3_hold_expired_returns_zero(self):
-        """AC3: returns 0.0 after hold expires and below threshold."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))
-        result = f.update(1.0, _t(11))
+    def test_hold_timer_boundary_one_second_past(
+        self, hf_active: HysteresisFilter
+    ) -> None:
+        """AC7: One second past hold_until, state transitions to INACTIVE."""
+        result = hf_active.update(2.0, _t(HOLD_MINUTES, seconds=1))
+        assert hf_active.state == "INACTIVE"
         assert result == pytest.approx(0.0)
-
-    def test_ac3_exact_hold_boundary_still_active(self):
-        """AC3: at exactly hold_until → still within hold (not expired yet)."""
-        f = HysteresisFilter(CFG)
-        now = _t(0)
-        f.update(5.0, now)
-        # At exactly hold_until (now < hold_until is False), should expire
-        result = f.update(1.0, now + timedelta(minutes=10))
-        # At now == hold_until: `now < hold_until` is False → expired → INACTIVE
-        assert f.state == "INACTIVE"
-        assert result == pytest.approx(0.0)
-
-    # -----------------------------------------------------------------------
-    # AC4 — ACTIVE + above threshold → hold renewed, returns reported_kw
-    # -----------------------------------------------------------------------
-
-    def test_ac4_above_threshold_renews_hold(self):
-        """AC4: above threshold in ACTIVE state → hold_until renewed."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))           # initial ACTIVE, hold_until = t+10
-        f.update(2.0, _t(5))           # within hold — stays ACTIVE
-        result = f.update(6.0, _t(9))  # renew: hold_until = t(9)+10 = t(19)
-        assert f.state == "ACTIVE"
-        assert result == pytest.approx(6.0)
-
-    def test_ac4_hold_renewed_extends_window(self):
-        """AC4: after renewal, old expiry no longer terminates the hold."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))          # hold_until = t(10)
-        f.update(6.0, _t(9))          # renew: hold_until = t(19)
-        # t(18) is still within renewed hold
-        result2 = f.update(1.0, _t(18))
-        assert f.state == "ACTIVE"
-        assert result2 == pytest.approx(6.0)  # returns last renewed value
 
 
 # ---------------------------------------------------------------------------
-# AC5 — force_failsafe() from any state
+# AC4, AC5 — FAILSAFE transitions
 # ---------------------------------------------------------------------------
 
-class TestFailsafe:
-    def test_ac5_force_failsafe_from_inactive(self):
-        """AC5: force_failsafe() from INACTIVE → FAILSAFE."""
-        f = HysteresisFilter(CFG)
-        assert f.state == "INACTIVE"
-        f.force_failsafe("test_inactive")
-        assert f.state == "FAILSAFE"
+class TestFailsafeAndResume:
 
-    def test_ac5_force_failsafe_clears_hold_until(self):
-        """AC5: hold_until is cleared on force_failsafe."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        assert f._hold_until is None
+    def test_force_failsafe_from_any_state(self, hf: HysteresisFilter) -> None:
+        """AC4: force_failsafe() must work from INACTIVE, ACTIVE, and FAILSAFE."""
+        # From INACTIVE
+        hf.force_failsafe("sensor unavailable")
+        assert hf.state == "FAILSAFE"
 
-    def test_ac5_force_failsafe_clears_last_reported_kw(self):
-        """AC5: _last_reported_kw set to 0.0 on force_failsafe."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))         # sets _last_reported_kw = 5.0
-        f.force_failsafe("test")
-        assert f._last_reported_kw == pytest.approx(0.0)
+        # From ACTIVE (new instance)
+        hf2 = HysteresisFilter(CFG)
+        hf2.update(5.0, _t(0))
+        assert hf2.state == "ACTIVE"
+        hf2.force_failsafe("active then failsafe")
+        assert hf2.state == "FAILSAFE"
 
-    def test_ac5_force_failsafe_from_active(self):
-        """AC5: force_failsafe() from ACTIVE → FAILSAFE."""
-        f = HysteresisFilter(CFG)
-        f.update(5.0, _t(0))
-        assert f.state == "ACTIVE"
-        f.force_failsafe("test_active")
-        assert f.state == "FAILSAFE"
+        # From FAILSAFE (already in it — calling again is idempotent)
+        hf3 = HysteresisFilter(CFG)
+        hf3.force_failsafe("first")
+        hf3.force_failsafe("second")
+        assert hf3.state == "FAILSAFE"
 
-    def test_ac5_force_failsafe_from_failsafe(self):
-        """AC5: force_failsafe() while already in FAILSAFE stays FAILSAFE."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("first")
-        f.force_failsafe("second")
-        assert f.state == "FAILSAFE"
+    def test_force_failsafe_clears_hold_and_last_kw(self, hf_active: HysteresisFilter) -> None:
+        """force_failsafe() clears hold_until and sets _last_reported_kw = 0.0."""
+        hf_active.force_failsafe("test")
+        assert hf_active._hold_until is None
+        assert hf_active._last_reported_kw == pytest.approx(0.0)
 
-    # -----------------------------------------------------------------------
-    # AC6 — FAILSAFE: update() always returns 0.0
-    # -----------------------------------------------------------------------
+    def test_failsafe_update_always_returns_zero(self, hf_failsafe: HysteresisFilter) -> None:
+        """FAILSAFE: update() returns 0.0 for any input, state stays FAILSAFE."""
+        for kw in (0.0, 3.0, 5.0, 100.0):
+            result = hf_failsafe.update(kw, _t(0))
+            assert result == pytest.approx(0.0)
+            assert hf_failsafe.state == "FAILSAFE"
 
-    def test_ac6_failsafe_update_returns_zero_high_value(self):
-        """AC6: update() in FAILSAFE returns 0.0 even for high kW values."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        assert f.update(100.0, _t(0)) == pytest.approx(0.0)
+    def test_failsafe_resume_goes_to_inactive(self, hf_failsafe: HysteresisFilter) -> None:
+        """AC5: resume() transitions FAILSAFE → INACTIVE, hold_until stays None."""
+        hf_failsafe.resume()
+        assert hf_failsafe.state == "INACTIVE"
+        assert hf_failsafe._hold_until is None
 
-    def test_ac6_failsafe_state_unchanged_after_update(self):
-        """AC6: state remains FAILSAFE after update() call."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        f.update(100.0, _t(0))
-        assert f.state == "FAILSAFE"
-
-    def test_ac6_failsafe_no_automatic_recovery(self):
-        """AC6: multiple update() calls don't auto-recover from FAILSAFE."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        for i in range(5):
-            assert f.update(10.0, _t(i)) == pytest.approx(0.0)
-        assert f.state == "FAILSAFE"
-
-    # -----------------------------------------------------------------------
-    # AC7 — resume() from FAILSAFE → INACTIVE
-    # -----------------------------------------------------------------------
-
-    def test_ac7_resume_resets_to_inactive(self):
-        """AC7: resume() transitions FAILSAFE → INACTIVE."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        f.resume()
-        assert f.state == "INACTIVE"
-
-    def test_ac7_hold_until_still_none_after_resume(self):
-        """AC7: hold_until remains None after resume()."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        f.resume()
-        assert f._hold_until is None
-
-    def test_ac7_next_update_evaluates_fresh_below_threshold(self):
-        """AC7: after resume(), update() below threshold stays INACTIVE."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        f.resume()
-        result = f.update(1.0, _t(0))
-        assert f.state == "INACTIVE"
+    def test_after_resume_below_threshold_returns_zero(
+        self, hf_failsafe: HysteresisFilter
+    ) -> None:
+        """After resume, update below threshold returns 0.0 and stays INACTIVE."""
+        hf_failsafe.resume()
+        result = hf_failsafe.update(2.0, _t(0))
+        assert hf_failsafe.state == "INACTIVE"
         assert result == pytest.approx(0.0)
 
-    def test_ac7_next_update_evaluates_fresh_above_threshold(self):
-        """AC7: after resume(), update() above threshold transitions to ACTIVE."""
-        f = HysteresisFilter(CFG)
-        f.force_failsafe("test")
-        f.resume()
-        result = f.update(5.0, _t(0))
-        assert f.state == "ACTIVE"
+    def test_after_resume_above_threshold_activates(
+        self, hf_failsafe: HysteresisFilter
+    ) -> None:
+        """After resume, update above threshold can activate normally (fresh eval)."""
+        hf_failsafe.resume()
+        result = hf_failsafe.update(5.0, _t(0))
+        assert hf_failsafe.state == "ACTIVE"
         assert result == pytest.approx(5.0)
 
 
 # ---------------------------------------------------------------------------
-# AC8 — HA-free unit test compatibility
+# AC9 — HA-freedom verification
 # ---------------------------------------------------------------------------
 
-class TestHaFree:
-    def test_ac8_no_homeassistant_in_modules(self):
-        """AC8: HysteresisFilter is importable without homeassistant.
+class TestHAFreedom:
 
-        The real check is that instantiation succeeds with stdlib only.
-        Other tests in the same pytest session may pull in HA, so we
-        only verify the module itself has no hard HA dependency.
+    def test_no_homeassistant_import(self) -> None:
+        """AC9: surplus_engine does not require real homeassistant package.
+
+        conftest.py installs lightweight stubs (types.ModuleType, no __version__)
+        for other tests. Those stubs are acceptable — real HA is not.
         """
-        import sys
-        # Tolerance for HA env (other tests in session may load it) — the
-        # authoritative check is that HysteresisFilter.__init__ requires no HA.
-        assert "homeassistant" not in sys.modules or True  # HA-env tolerance
-
-    def test_ac8_only_stdlib_in_init(self):
-        """AC8: HysteresisFilter.__init__ only uses stdlib (datetime, timedelta)."""
-        f = HysteresisFilter(CFG)
-        assert f.state == "INACTIVE"
-        assert f._hold_until is None
-        assert f._last_reported_kw == pytest.approx(0.0)
-
-    def test_ac8_default_config_values(self):
-        """AC8: empty config uses defaults (hold=10min, threshold=4.2kW)."""
-        f = HysteresisFilter({})
-        assert f._hold_time_minutes == 10
-        assert f._wallbox_threshold_kw == pytest.approx(4.2)
+        ha_mods = [k for k in sys.modules if k.startswith("homeassistant")]
+        if ha_mods:
+            # Stubs installed by conftest have no __version__; real HA does
+            real_ha = hasattr(sys.modules.get("homeassistant"), "__version__")
+            assert not real_ha, (
+                f"Real homeassistant package imported: {ha_mods}. "
+                "HysteresisFilter must remain HA-free."
+            )

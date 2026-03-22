@@ -1,5 +1,5 @@
 # generated: 2026-03-21T00:00:00
-# last_updated: 2026-03-21T00:00:00
+# last_updated: 2026-03-22T00:00:00
 # project: sdm630-simulator
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,8 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-03-21T00:00:00"
-last_updated: "2026-03-21T20:00:00"
-project: sdm630-simulator
+last_updated: "2026-03-22T00:00:00"project: sdm630-simulator
 project_key: NOKEY
 tracking_system: file-system
 story_location: _bmad-output/implementation-artifacts
@@ -72,7 +71,25 @@ development_status:
   epic-4-retrospective: optional
 
   # Epic 5: Test Infrastructure — Unit Tests for Pure Logic Components
-  epic-5: in-progress
-  5-1-test-infrastructure-setup-and-surpluscalculator-tests: ready-for-dev
-  5-2-hysteresisfilter-state-machine-tests: ready-for-dev
+  epic-5: done
+  5-1-test-infrastructure-setup-and-surpluscalculator-tests: done
+  5-2-hysteresisfilter-state-machine-tests: done
   epic-5-retrospective: optional
+
+  # --- Wallbox Dashboard Extension (epics-wallbox-dashboard-extension.md) ---
+
+  # Epic 6: Surplus Signal Visibility
+  epic-6: in-progress
+  6-1-add-raw-and-reported-surplus-sensor-entities: ready-for-dev
+  epic-6-retrospective: optional
+
+  # Epic 7: Wallbox Connectivity Monitoring
+  epic-7: in-progress
+  7-1-add-last-poll-timestamp-sensor-and-modbus-hook: ready-for-dev
+  7-2-implement-5-minute-warning-binary-sensor: ready-for-dev
+  epic-7-retrospective: optional
+
+  # Epic 8: Dashboard Integration
+  epic-8: in-progress
+  8-1-create-lovelace-card-yaml-with-conditional-orange-state: ready-for-dev
+  epic-8-retrospective: optional

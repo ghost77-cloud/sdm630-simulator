@@ -333,8 +333,8 @@ class HysteresisFilter:
             self._last_reported_kw = reported_kw
             return reported_kw
 
-        # Below threshold: check hold
-        if self._hold_until is not None and now < self._hold_until:
+        # Below threshold: check hold (inclusive boundary — AC6 requires <= not <)
+        if self._hold_until is not None and now <= self._hold_until:
             # Still within hold period — return last valid value
             return self._last_reported_kw
 
