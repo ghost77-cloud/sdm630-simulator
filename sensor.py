@@ -304,7 +304,7 @@ class SDM630SimSensor(SensorEntity):
                 continue
             try:
                 self._sensor_cache[cache_key] = (
-                    float(state.state), state.last_changed, True
+                    float(state.state), state.last_updated, True
                 )
             except (ValueError, TypeError):
                 pass
@@ -331,7 +331,7 @@ class SDM630SimSensor(SensorEntity):
             return
         try:
             self._sensor_cache[cache_key] = (
-                float(new_state.state), new_state.last_changed, True
+                float(new_state.state), new_state.last_updated, True
             )
             self._invalidation_reasons.pop(cache_key, None)
         except (ValueError, TypeError):
@@ -347,7 +347,7 @@ class SDM630SimSensor(SensorEntity):
         """Check critical sensor cache entries for staleness (Story 4.2).
 
         Returns a non-empty reason string and triggers FAILSAFE if any critical
-        sensor's last_changed timestamp exceeds stale_threshold_seconds.
+        sensor's last_updated timestamp exceeds stale_threshold_seconds.
         Returns empty string if all critical sensors are fresh.
         Sensors absent from _cache_key_to_entity or with None timestamps are
         silently skipped (startup grace — AC4, AC5).
