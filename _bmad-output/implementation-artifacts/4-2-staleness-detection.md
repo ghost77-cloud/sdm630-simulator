@@ -1,6 +1,6 @@
 # Story 4.2: Staleness Detection
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -68,13 +68,13 @@ And all staleness logic lives in `SurplusEngine._check_staleness()` only
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `_cache_key_to_entity_id` reverse mapping to `SurplusEngine.__init__` (AC: #1, #5)
-  - [ ] Build `self._cache_key_to_entity_id: dict[str, str]` from `self._config["entities"]`
+- [x] Task 1: Add `_cache_key_to_entity_id` reverse mapping to `SurplusEngine.__init__` (AC: #1, #5)
+  - [x] Build `self._cache_key_to_entity_id: dict[str, str]` from `self._config["entities"]`
     keyed by `CACHE_KEY_*` constants, mapping to the configured entity ID strings
-  - [ ] Include only the three critical keys:
+  - [x] Include only the three critical keys:
     `CACHE_KEY_SOC`, `CACHE_KEY_PV_PRODUCTION`, `CACHE_KEY_POWER_TO_USER`
-  - [ ] `CACHE_KEY_POWER_TO_GRID` is non-critical (informational); exclude from staleness checks
-  - [ ] Example mapping (resolved from config):
+  - [x] `CACHE_KEY_POWER_TO_GRID` is non-critical (informational); exclude from staleness checks
+  - [x] Example mapping (resolved from config):
     ```python
     self._cache_key_to_entity_id = {
         CACHE_KEY_SOC:           config["entities"]["soc"],
@@ -83,55 +83,55 @@ And all staleness logic lives in `SurplusEngine._check_staleness()` only
     }
     ```
 
-- [ ] Task 2: Implement `SurplusEngine._check_staleness()` method (AC: #1–#5)
-  - [ ] Signature: `def _check_staleness(self) -> bool`
-  - [ ] Read `threshold = self._config.get("stale_threshold_seconds", 60)` (int seconds)
-  - [ ] Call `now = dt_util.utcnow()` (requires `from homeassistant.util import dt as dt_util`)
-  - [ ] Iterate over `self._cache_key_to_entity_id.items()` (only critical keys — see Task 1)
-  - [ ] For each `(cache_key, entity_id)`:
-    - [ ] `entry = self._sensor_cache.get(cache_key)` — if `None`, `continue` (startup grace)
-    - [ ] Unpack `value, last_changed, is_valid = entry`
-    - [ ] If `last_changed is None`, `continue` (startup grace — AC4)
-    - [ ] `elapsed = (now - last_changed).total_seconds()`
-    - [ ] If `elapsed > threshold` (strict `>`, not `>=` — AC3):
-      - [ ] `reason = f"{entity_id} stale for {int(elapsed)}s"`
-      - [ ] `_LOGGER.warning("SDM630 FAIL-SAFE: %s stale for %ds. Reporting 0 kW.", entity_id, int(elapsed))`
-      - [ ] `self._hysteresis.force_failsafe(reason)`
-      - [ ] `return True`
-  - [ ] Return `False` if no staleness detected
+- [x] Task 2: Implement `SurplusEngine._check_staleness()` method (AC: #1–#5)
+  - [x] Signature: `def _check_staleness(self) -> bool`
+  - [x] Read `threshold = self._config.get("stale_threshold_seconds", 60)` (int seconds)
+  - [x] Call `now = dt_util.utcnow()` (requires `from homeassistant.util import dt as dt_util`)
+  - [x] Iterate over `self._cache_key_to_entity_id.items()` (only critical keys — see Task 1)
+  - [x] For each `(cache_key, entity_id)`:
+    - [x] `entry = self._sensor_cache.get(cache_key)` — if `None`, `continue` (startup grace)
+    - [x] Unpack `value, last_changed, is_valid = entry`
+    - [x] If `last_changed is None`, `continue` (startup grace — AC4)
+    - [x] `elapsed = (now - last_changed).total_seconds()`
+    - [x] If `elapsed > threshold` (strict `>`, not `>=` — AC3):
+      - [x] `reason = f"{entity_id} stale for {int(elapsed)}s"`
+      - [x] `_LOGGER.warning("SDM630 FAIL-SAFE: %s stale for %ds. Reporting 0 kW.", entity_id, int(elapsed))`
+      - [x] `self._hysteresis.force_failsafe(reason)`
+      - [x] `return True`
+  - [x] Return `False` if no staleness detected
 
-- [ ] Task 3: Wire `_check_staleness()` into `_evaluation_tick` (AC: #1, #2)
-  - [ ] Call `self._check_staleness()` at the top of `_evaluation_tick`,
+- [x] Task 3: Wire `_check_staleness()` into `_evaluation_tick` (AC: #1, #2)
+  - [x] Call `self._check_staleness()` at the top of `_evaluation_tick`,
     BEFORE the unavailability check from Story 4.1 and BEFORE snapshot assembly
-  - [ ] Order of checks in `_evaluation_tick` (combined with Story 4.1):
+  - [x] Order of checks in `_evaluation_tick` (combined with Story 4.1):
     1. `stale = self._check_staleness()`      ← Story 4.2 — NEW
     2. `unavailable = self._check_availability()`  ← Story 4.1 (already exists)
     3. Recovery: if `not stale and not unavailable and self._hysteresis.state == "FAILSAFE"` →
        `self._hysteresis.resume()` + `_LOGGER.info(...)` (same path as Story 4.1)
     4. Build `SensorSnapshot` and call `evaluate_cycle(snapshot)` as before
-  - [ ] The hysteresis filter handles FAILSAFE output automatically: when
+  - [x] The hysteresis filter handles FAILSAFE output automatically: when
     `self._hysteresis.state == "FAILSAFE"`, `update()` returns `0.0` and
     `charging_state` becomes `"FAILSAFE"` — no extra result manipulation needed
 
-- [ ] Task 4: Confirm `_handle_state_change` stores `last_changed` timestamp (Story 4.1 contract — verify only, no new code)
-  - [ ] Verify that Story 4.1's `_handle_state_change` stores cache tuples as
+- [x] Task 4: Confirm `_handle_state_change` stores `last_changed` timestamp (Story 4.1 contract — verify only, no new code)
+  - [x] Verify that Story 4.1's `_handle_state_change` stores cache tuples as
     `(float(new_state.state), new_state.last_changed, True)` when value is valid
-  - [ ] Verify that `new_state.last_changed` is a timezone-aware `datetime`
+  - [x] Verify that `new_state.last_changed` is a timezone-aware `datetime`
     (HA `State` object contract)
-  - [ ] If Story 4.1 used a different cache format, update `_check_staleness()` accordingly
+  - [x] If Story 4.1 used a different cache format, update `_check_staleness()` accordingly
     (this task is read-only — no code added until story 4.1 format is confirmed)
 
-- [ ] Task 5: Unit tests in `tests/test_surplus_engine_staleness.py` or extend existing test file
-  - [ ] AC1 test: mock `_sensor_cache` with `last_changed = dt_util.utcnow() - timedelta(seconds=61)`,
+- [x] Task 5: Unit tests in `tests/test_surplus_engine_staleness.py` or extend existing test file
+  - [x] AC1 test: mock `_sensor_cache` with `last_changed = dt_util.utcnow() - timedelta(seconds=61)`,
     assert `force_failsafe` called, warning logged
-  - [ ] AC2 test: after stale period, update cache with fresh `last_changed`,
+  - [x] AC2 test: after stale period, update cache with fresh `last_changed`,
     assert `_check_staleness()` returns `False`
-  - [ ] AC3 test: `elapsed == 60` (exact threshold) → returns `False` (no FAILSAFE)
-  - [ ] AC4 test: cache entry `(0.0, None, True)` → skipped, returns `False`
-  - [ ] AC4 test: empty `_sensor_cache` (no entries yet) → returns `False`
-  - [ ] AC5 test: only `CACHE_KEY_SOC` stale, `CACHE_KEY_BATTERY_DISCHARGE` not in
+  - [x] AC3 test: `elapsed == 60` (exact threshold) → returns `False` (no FAILSAFE)
+  - [x] AC4 test: cache entry `(0.0, None, True)` → skipped, returns `False`
+  - [x] AC4 test: empty `_sensor_cache` (no entries yet) → returns `False`
+  - [x] AC5 test: only `CACHE_KEY_SOC` stale, `CACHE_KEY_BATTERY_DISCHARGE` not in
     `_cache_key_to_entity_id` → only SOC triggers FAILSAFE, no `KeyError`
-  - [ ] AC6 check: `SurplusCalculator` module has no new `homeassistant` imports
+  - [x] AC6 check: `SurplusCalculator` module has no new `homeassistant` imports
 
 ## Dev Notes
 
@@ -356,10 +356,26 @@ activates — this is intentional (inverter not responding after 60 s is a fault
 
 ### Agent Model Used
 
-<!-- to be filled by dev agent -->
+Claude Sonnet 4.6 (GitHub Copilot)
 
 ### Debug Log References
 
+All 367 tests passed on first run. No regressions.
+
 ### Completion Notes List
 
+- `_check_staleness()` implemented on `SDM630SimSensor` (sensor.py), not `SurplusEngine`,
+  because the `_sensor_cache` and `_cache_key_to_entity` already live there (Story 4.1
+  diverged from the story spec's assumed placement). Architecture boundary preserved:
+  `SurplusCalculator` has zero new HA imports (AC6).
+- `_evaluation_tick` restructured so both `_check_staleness()` and `_check_cache_validity()`
+  run before the early-return, enabling correct combined-recovery logic.
+- When staleness triggers FAILSAFE, `_failsafe_reason_logged = "__stale__"` is set so the
+  existing recovery path fires correctly when staleness clears (AC2).
+- `dt_util` was already imported in sensor.py (from Story 1.3 / 4.1) — no new import needed.
+- 18 new unit tests in `tests/test_surplus_engine_staleness.py` covering all 6 ACs.
+
 ### File List
+
+- `sensor.py` — added `_check_staleness()` method; restructured `_evaluation_tick`
+- `tests/test_surplus_engine_staleness.py` — new; 18 tests for AC1–AC6

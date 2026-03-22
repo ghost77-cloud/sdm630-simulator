@@ -146,6 +146,45 @@ class SDM630SimSensor(SensorEntity):
                 entity_id, new_state.state,
             )
 
+    def _check_staleness(self) -> str:
+        """Check critical sensor cache entries for staleness (Story 4.2).
+
+        Returns a non-empty reason string and triggers FAILSAFE if any critical
+        sensor's last_changed timestamp exceeds stale_threshold_seconds.
+        Returns empty string if all critical sensors are fresh.
+        Sensors absent from _cache_key_to_entity or with None timestamps are
+        silently skipped (startup grace — AC4, AC5).
+        """
+        threshold: int = self._config.get("stale_threshold_seconds", 60)
+        now = dt_util.utcnow()
+        critical_keys = (CACHE_KEY_SOC, CACHE_KEY_PV_PRODUCTION, CACHE_KEY_POWER_TO_USER)
+
+        for cache_key in critical_keys:
+            entity_id = self._cache_key_to_entity.get(cache_key)
+            if entity_id is None:
+                continue  # not configured — AC5
+
+            entry = self._sensor_cache.get(cache_key)
+            if entry is None:
+                continue  # not in cache yet — startup grace
+
+            _value, last_changed, _is_valid = entry
+            if last_changed is None:
+                continue  # explicit startup grace sentinel — AC4
+
+            elapsed = (now - last_changed).total_seconds()
+            if elapsed > threshold:  # strict > — AC3
+                reason = f"{entity_id} stale for {int(elapsed)}s"
+                _LOGGER.warning(
+                    "SDM630 FAIL-SAFE: %s stale for %ds. Reporting 0 kW.",
+                    entity_id,
+                    int(elapsed),
+                )
+                self._engine.hysteresis_filter.force_failsafe(reason)
+                return reason
+
+        return ""
+
     async def _evaluation_tick(self, now) -> None:
         """Called by async_track_time_interval at each evaluation cycle."""
         if self._first_tick:
@@ -157,10 +196,26 @@ class SDM630SimSensor(SensorEntity):
             )
             self._first_tick = False
 
-        # Story 4.1: sensor-unavailability fail-safe guard
-        cache_valid, reason = self._check_cache_validity()
-        if not cache_valid:
-            self._engine.hysteresis_filter.force_failsafe(reason)
+        # Story 4.2: staleness detection (force_failsafe called internally if stale)
+        stale_reason = self._check_staleness()
+
+        # Story 4.1: sensor-unavailability fail-safe guard (skip if already stale)
+        if stale_reason:
+            failsafe_reason = stale_reason
+        else:
+            cache_valid, validity_reason = self._check_cache_validity()
+            if not cache_valid:
+                self._engine.hysteresis_filter.force_failsafe(validity_reason)
+                failsafe_reason = validity_reason
+            else:
+                failsafe_reason = ""
+
+        if failsafe_reason:
+            if self._failsafe_reason_logged != failsafe_reason:
+                _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", failsafe_reason)
+                self._failsafe_reason_logged = failsafe_reason
+            else:
+                _LOGGER.debug("SDM630 FAIL-SAFE (ongoing): %s", failsafe_reason)
             result = EvaluationResult(
                 reported_kw=0.0,
                 real_surplus_kw=0.0,
@@ -168,7 +223,7 @@ class SDM630SimSensor(SensorEntity):
                 soc_percent=self._sensor_cache.get(CACHE_KEY_SOC, (0.0,))[0],
                 soc_floor_active=SOC_HARD_FLOOR,
                 charging_state="FAILSAFE",
-                reason=reason,
+                reason=failsafe_reason,
                 forecast_available=False,
             )
             _LOGGER.debug(
@@ -178,15 +233,10 @@ class SDM630SimSensor(SensorEntity):
                 result.soc_floor_active, result.charging_state, result.reported_kw,
                 result.reason, result.forecast_available,
             )
-            if self._failsafe_reason_logged != reason:
-                _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", reason)
-                self._failsafe_reason_logged = reason
-            else:
-                _LOGGER.debug("SDM630 FAIL-SAFE (ongoing): %s", reason)
             self._write_result(result)
             return
 
-        # Recovery: all sensors healthy again after a FAILSAFE period
+        # Recovery: both staleness and validity checks passed
         if self._failsafe_reason_logged is not None:
             self._engine.hysteresis_filter.resume()
             _LOGGER.info("SDM630 recovered from FAILSAFE. Resuming normal evaluation.")
