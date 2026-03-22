@@ -463,6 +463,7 @@ class SDM630SimSensor(SensorEntity):
 
         sunset_time = None
         sunrise_time = None
+        # sun.sun provides both times; always read it for sunrise + sunset fallback
         sun_state = self.hass.states.get("sun.sun")
         if sun_state and sun_state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             raw_setting = sun_state.attributes.get("next_setting")
@@ -473,6 +474,18 @@ class SDM630SimSensor(SensorEntity):
                 sunrise_time = dt_util.parse_datetime(raw_rising)
         else:
             _LOGGER.debug("sun.sun unavailable — solar boundary times set to None")
+
+        # If a dedicated sunset entity is configured (e.g. sensor.sun_next_setting
+        # from the sun2 integration), use its state as primary sunset time.
+        sunset_entity = self._config.get(CONF_ENTITIES, {}).get("sunset")
+        if sunset_entity:
+            ss = self.hass.states.get(sunset_entity)
+            if ss and ss.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                parsed = dt_util.parse_datetime(ss.state)
+                if parsed is not None:
+                    sunset_time = parsed
+            else:
+                _LOGGER.debug("sunset entity %s unavailable — keeping sun.sun value", sunset_entity)
 
         snapshot = SensorSnapshot(
             soc_percent     = self._sensor_cache.get(CACHE_KEY_SOC, (0.0, None, False))[0],

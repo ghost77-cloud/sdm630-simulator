@@ -27,6 +27,7 @@ Die Sensordaten des Wechselrichters liefert
 - Surplus-Engine mit Batteriepuffer, Hysterese und Fail-Safe
 - SOC-Floor-Strategie nach Uhrzeit und Jahreszeit
 - Optionale Wettervorhersage und Solar-Forecast-Integration
+- Sonnenuntergang-Cutoff — stoppt das Laden vor Einbruch der Dämmerung
 - Staleness- und Range-Validierung aller Sensoreingänge
 - Dashboard-Sensoren für Überschuss, letzten Poll und Warnungen
 
@@ -63,6 +64,7 @@ sdm630_simulator:
     # -- Optionale Entitäten (für Forecast) --
     weather: weather.home                        # Wetter-Service
     forecast_solar: sensor.forecast_solar_kwh    # Solar-Forecast
+    sunset: sensor.sun_next_setting              # Nächster Sonnenuntergang
 
   # -- Schwellwerte --
   wallbox_threshold_kw: 4.2      # Min. Überschuss zum Laden (kW)
@@ -82,6 +84,10 @@ sdm630_simulator:
 
   # -- Forecast --
   solar_remaining_threshold_kwh: 2.0  # Kritischer Solar-Rest (kWh)
+
+  # -- Sonnenuntergang --
+  sunset_cutoff_minutes: 60      # Laden N Minuten vor Sonnenuntergang
+                                 # stoppen (0 = deaktiviert)
 
   # -- SOC-Floor nach Uhrzeit --
   time_strategy:
@@ -137,7 +143,9 @@ Die Surplus-Engine wird alle 15 Sekunden (konfigurierbar) ausgewertet:
 4. **Überschuss berechnen** — PV-Erzeugung minus Hausverbrauch
 5. **Batteriepuffer** — verfügbare Energie über dem SOC-Floor einrechnen
 6. **Hysterese** — Haltezeit, um bei kurzen Einbrüchen nicht abzuschalten
-7. **Modbus-Register aktualisieren** — Wallbox sieht neuen Wert
+7. **Sonnenuntergang-Cutoff** — innerhalb des Cutoff-Fensters kein neues
+   Aktivieren (verhindert Nachladen kurz vor Sonnenuntergang)
+8. **Modbus-Register aktualisieren** — Wallbox sieht neuen Wert
 
 ### Ladezustände
 
@@ -156,6 +164,30 @@ Der Filter verhindert schnelles Ein/Aus bei schwankender PV-Leistung:
   Überschuss kurz unter die Schwelle fällt
 - **Deaktivierung:** erst nach Ablauf der Haltezeit, wenn weiterhin zu
   wenig Überschuss vorhanden ist
+
+### Sonnenuntergang-Cutoff
+
+Mit `sunset_cutoff_minutes` (Standard: 0 = deaktiviert) kann das
+Laden automatisch gestoppt werden, bevor die PV-Erzeugung abends
+stark abfällt:
+
+- Innerhalb des konfigurierten Zeitfensters vor dem nächsten
+  Sonnenuntergang wird der Überschuss auf 0 kW gesetzt.
+- Die Hysterese-Haltezeit läuft noch ab — ein bereits aktiver
+  Ladezyklus endet spätestens nach `hold_time_minutes`.
+- Wenn die Sonne bereits untergegangen ist (`sun_next_setting`
+  zeigt auf „morgen"), feuert der Cutoff nicht.
+
+Die Untergangszeit wird aus `sun.sun` (eingebaut in HA) gelesen.
+Alternativ kann eine dedizierte Entität angegeben werden, z. B. vom
+[`sun2`](https://github.com/pnbruckner/ha-sun2)-Integration:
+
+```yaml
+sdm630_simulator:
+  entities:
+    sunset: sensor.sun_next_setting   # überschreibt sun.sun
+  sunset_cutoff_minutes: 60           # 60 Minuten vor Sonnenuntergang
+```
 
 ### Fail-Safe
 
