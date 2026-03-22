@@ -39,6 +39,7 @@ CONF_PV_PRODUCTION        = "pv_production"    # required
 CONF_POWER_TO_USER        = "power_to_user"    # required
 CONF_WEATHER              = "weather"          # optional
 CONF_FORECAST_SOLAR       = "forecast_solar"   # optional
+CONF_SUNSET               = "sunset"           # optional — overrides sun.sun for next_setting
 
 CONF_TIME_STRATEGY        = "time_strategy"
 CONF_SEASONAL_TARGETS     = "seasonal_targets"
@@ -53,6 +54,7 @@ CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"
 CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"
 CONF_MAX_INVERTER_OUTPUT_KW = "max_inverter_output_kw"
 CONF_SENSOR_RANGES        = "sensor_ranges"   # optional; keys: soc, power_w
+CONF_SUNSET_CUTOFF_MINUTES = "sunset_cutoff_minutes"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DEFAULTS: dict = {
@@ -66,6 +68,7 @@ DEFAULTS: dict = {
     "battery_capacity_kwh": 10.0,
     "max_inverter_output_kw": 10.0,
     "solar_remaining_threshold_kwh": 2.0,
+    "sunset_cutoff_minutes": 0,         # 0 = disabled; e.g. 60 = stop charging 60 min before sunset
     # sensor_ranges: plausible value bounds for cache validation (Story 4.4)
     # Override in YAML with sensor_ranges: { soc: [0, 100], power_w: [-30000, 30000] }
     "sensor_ranges": {
@@ -93,6 +96,7 @@ ENTITIES_SCHEMA = vol.Schema(
         vol.Required(CONF_POWER_TO_USER): cv.entity_id,
         vol.Optional(CONF_WEATHER):       cv.entity_id,
         vol.Optional(CONF_FORECAST_SOLAR): cv.entity_id,
+        vol.Optional(CONF_SUNSET):         cv.entity_id,
     }
 )
 
@@ -140,6 +144,7 @@ COMPONENT_SCHEMA = vol.Schema(
         vol.Optional(CONF_BATTERY_CAPACITY_KWH):  vol.Coerce(float),
         vol.Optional(CONF_MAX_INVERTER_OUTPUT_KW): vol.Coerce(float),
         vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float),
+        vol.Optional(CONF_SUNSET_CUTOFF_MINUTES):  vol.All(int, vol.Range(min=0, max=240)),
         vol.Optional(CONF_SENSOR_RANGES):          SENSOR_RANGES_SCHEMA,
     },
     extra=vol.ALLOW_EXTRA,
@@ -162,7 +167,7 @@ async def async_setup(hass, config):
         "evaluation_interval", "wallbox_threshold_kw", "wallbox_min_kw",
         "hold_time_minutes", "soc_hard_floor", "stale_threshold_seconds",
         "max_discharge_kw", "battery_capacity_kwh", "max_inverter_output_kw",
-        "solar_remaining_threshold_kwh",
+        "solar_remaining_threshold_kwh", "sunset_cutoff_minutes",
     }
     cfg: dict = {}
     for key in _SCALAR_KEYS:

@@ -937,3 +937,146 @@ def test_forecast_unavailable_conservative(se, make_snapshot, base_config):
     # Floor must not exceed base time-window value (midday=50, no forecast forcing)
     assert result.soc_floor_active == 50
 
+
+# ===========================================================================
+# Sunset cutoff — sunset_cutoff_minutes
+# ===========================================================================
+
+CUTOFF_CONFIG: dict = {
+    **FLOOR_50_CONFIG,
+    "sunset_cutoff_minutes": 60,  # stop charging 60 min before sunset
+}
+
+
+class TestSunsetCutoff:
+    """sunset_cutoff_minutes: stop charging within the configured window before sunset.
+
+    AC1 — within cutoff → INACTIVE, reason contains 'near_sunset'
+    AC2 — at cutoff boundary (exactly N min) → triggers (inclusive)
+    AC3 — outside cutoff window → ACTIVE as normal
+    AC4 — sun already set (negative minutes) → cutoff does NOT fire
+    AC5 — sunset_time=None → cutoff cannot fire → ACTIVE
+    AC6 — cutoff=0 (default) → feature disabled → ACTIVE
+    AC7 — real_surplus_kw still populated in result when cutoff fires
+    AC8 — reason string contains the minutes-to-sunset value
+    """
+
+    @staticmethod
+    def _snap_with_sunset(se, *, minutes_to_sunset, pv_w=8000, user_w=500, soc=100):
+        """Build a snapshot with a sunset_time relative to timestamp."""
+        ts = datetime(2026, 3, 22, 16, 0, 0)
+        from datetime import timedelta
+        if minutes_to_sunset is not None:
+            sunset = ts + timedelta(minutes=minutes_to_sunset)
+        else:
+            sunset = None
+        return se.SensorSnapshot(
+            soc_percent=soc,
+            power_to_grid_w=0.0,
+            pv_production_w=pv_w,
+            power_to_user_w=user_w,
+            timestamp=ts,
+            sunset_time=sunset,
+            sunrise_time=None,
+            forecast=None,
+        )
+
+    # ── AC1 — within cutoff window ────────────────────────────────────────────
+
+    def test_within_cutoff_returns_inactive(self, se):
+        """30 min to sunset, cutoff=60 → INACTIVE with near_sunset reason."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=30)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "INACTIVE"
+        assert result.reported_kw == pytest.approx(0.0)
+        assert "near_sunset" in result.reason
+
+    # ── AC2 — boundary: exactly at cutoff limit ───────────────────────────────
+
+    def test_at_cutoff_boundary_triggers(self, se):
+        """Exactly 60 min to sunset, cutoff=60 → triggers (≤ is inclusive)."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=60)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "INACTIVE"
+        assert "near_sunset" in result.reason
+
+    def test_one_minute_outside_cutoff_does_not_trigger(self, se):
+        """61 min to sunset, cutoff=60 → just outside window → ACTIVE."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=61)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "ACTIVE"
+        assert "near_sunset" not in result.reason
+
+    # ── AC3 — outside cutoff window ───────────────────────────────────────────
+
+    def test_outside_cutoff_returns_active(self, se):
+        """90 min to sunset, cutoff=60 → outside window → ACTIVE."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=90)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "ACTIVE"
+        assert "near_sunset" not in result.reason
+
+    # ── AC4 — after sunset: negative minutes_to_sunset must not fire ─────────
+
+    def test_past_sunset_does_not_trigger(self, se):
+        """sun.next_setting is tomorrow (minutes_to_sunset > 0 but large) — or past sunset.
+
+        When minutes_to_sunset is negative the guard '0 < minutes' is False → skip.
+        """
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=-5, pv_w=8000, user_w=500)
+        result = calc.calculate_surplus(snap)
+        assert "near_sunset" not in result.reason
+
+    # ── AC5 — no sunset data ─────────────────────────────────────────────────
+
+    def test_no_sunset_time_not_triggered(self, se):
+        """sunset_time=None → cutoff cannot trigger → ACTIVE."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=None)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "ACTIVE"
+        assert "near_sunset" not in result.reason
+
+    # ── AC6 — disabled by default ─────────────────────────────────────────────
+
+    def test_cutoff_zero_disabled(self, se):
+        """sunset_cutoff_minutes=0 → feature disabled → ACTIVE."""
+        cfg = {**FLOOR_50_CONFIG, "sunset_cutoff_minutes": 0}
+        calc = se.SurplusCalculator(cfg)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=10)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "ACTIVE"
+        assert "near_sunset" not in result.reason
+
+    def test_cutoff_not_configured_defaults_disabled(self, se):
+        """No sunset_cutoff_minutes key → default 0 → feature off → ACTIVE."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=10)
+        result = calc.calculate_surplus(snap)
+        assert result.charging_state == "ACTIVE"
+
+    # ── AC7 — real_surplus preserved in result ────────────────────────────────
+
+    def test_real_surplus_populated_when_cutoff_fires(self, se):
+        """Even when cutoff fires, real_surplus_kw is computed and returned."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=30, pv_w=6000, user_w=1000)
+        result = calc.calculate_surplus(snap)
+        assert result.real_surplus_kw == pytest.approx(5.0)
+        assert result.reported_kw == pytest.approx(0.0)
+        assert result.buffer_used_kw == pytest.approx(0.0)
+
+    # ── AC8 — reason contains minutes-to-sunset ───────────────────────────────
+
+    def test_reason_contains_minutes_to_sunset(self, se):
+        """Reason string must include the minutes value for observability."""
+        calc = se.SurplusCalculator(CUTOFF_CONFIG)
+        snap = self._snap_with_sunset(se, minutes_to_sunset=42)
+        result = calc.calculate_surplus(snap)
+        assert "42" in result.reason
+

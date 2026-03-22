@@ -261,6 +261,33 @@ class SurplusCalculator:
             snapshot.forecast.forecast_available if snapshot.forecast else False
         )
 
+        # Sunset cutoff: stop charging when within configured minutes of next sunset.
+        # Prevents the hysteresis hold-timer from refreshing active state as PV ramps down.
+        # Only triggers when 0 < minutes_to_sunset <= cutoff (daytime; not night/tomorrow).
+        sunset_cutoff_minutes = self.config.get("sunset_cutoff_minutes", 0)
+        if sunset_cutoff_minutes > 0 and snapshot.sunset_time is not None:
+            minutes_to_sunset = (
+                snapshot.sunset_time - snapshot.timestamp
+            ).total_seconds() / 60
+            if 0 < minutes_to_sunset <= sunset_cutoff_minutes:
+                reason = f"near_sunset({int(minutes_to_sunset)}min)|{forecast_tag}"
+                _LOGGER.info(
+                    "SDM630: %.0f min to sunset — stopping surplus charging "
+                    "(cutoff=%d min).",
+                    minutes_to_sunset,
+                    sunset_cutoff_minutes,
+                )
+                return EvaluationResult(
+                    reported_kw       = 0.0,
+                    real_surplus_kw   = real_surplus_kw,
+                    buffer_used_kw    = 0.0,
+                    soc_percent       = snapshot.soc_percent,
+                    soc_floor_active  = soc_floor,
+                    charging_state    = "INACTIVE",
+                    reason            = reason,
+                    forecast_available = forecast_available,
+                )
+
         if augmented_kw >= wallbox_threshold_kw:
             reason = f"wallbox_included_in_load|{forecast_tag}"
             _LOGGER.debug(
