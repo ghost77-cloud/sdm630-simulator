@@ -226,10 +226,9 @@ class TestConfigSchema:
     def test_config_schema_exists(self, comp):
         assert hasattr(comp, "CONFIG_SCHEMA"), "CONFIG_SCHEMA must exist"
 
-    def test_config_schema_key_is_sdm630_sim(self, comp):
-        # CONFIG_SCHEMA uses literal "sdm630_sim" NOT DOMAIN
+    def test_config_schema_key_is_domain(self, comp):
         valid = {
-            "sdm630_sim": {
+            comp.DOMAIN: {
                 "entities": {
                     "soc": "sensor.batt",
                     "power_to_grid": "sensor.grid",
@@ -239,11 +238,11 @@ class TestConfigSchema:
             }
         }
         result = comp.CONFIG_SCHEMA(valid)
-        assert "sdm630_sim" in result
+        assert comp.DOMAIN in result
 
     def test_config_schema_allows_extra_keys(self, comp):
         valid = {
-            "sdm630_sim": {
+            comp.DOMAIN: {
                 "entities": {
                     "soc": "sensor.batt",
                     "power_to_grid": "sensor.grid",
@@ -263,7 +262,7 @@ class TestConfigSchema:
 
 
 VALID_CONFIG = {
-    "sdm630_sim": {
+    "sdm630_simulator": {
         "entities": {
             "soc": "sensor.battery_soc",
             "power_to_grid": "sensor.grid_export",
@@ -319,7 +318,7 @@ class TestAsyncSetup:
         import logging
         hass = _make_hass()
         config_no_soc = {
-            "sdm630_sim": {
+            "sdm630_simulator": {
                 "entities": {
                     "power_to_grid": "sensor.grid_export",
                     "pv_production": "sensor.pv_power",
@@ -339,7 +338,7 @@ class TestAsyncSetup:
     async def test_seasonal_targets_merged_with_defaults(self, comp):
         hass = _make_hass()
         config_partial = {
-            "sdm630_sim": {
+            "sdm630_simulator": {
                 "entities": {
                     "soc": "sensor.batt",
                     "power_to_grid": "sensor.grid",
@@ -359,7 +358,7 @@ class TestAsyncSetup:
         hass = _make_hass()
         custom_ts = [{"before": "08:00", "soc_floor": 90}, {"default": True, "soc_floor": 60}]
         config_ts = {
-            "sdm630_sim": {
+            "sdm630_simulator": {
                 "entities": {
                     "soc": "sensor.batt",
                     "power_to_grid": "sensor.grid",
