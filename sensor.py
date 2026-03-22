@@ -1,6 +1,10 @@
 import logging
 from datetime import timedelta
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import callback
 from homeassistant.helpers.event import (
@@ -66,8 +70,71 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     """Set up the SDM630 simulated sensor."""
     name = config.get(CONF_NAME, DEFAULT_NAME)
     hass.loop.create_task(start_modbus_server())
+
+    raw_surplus_sensor = SDM630RawSurplusSensor()
+    reported_surplus_sensor = SDM630ReportedSurplusSensor()
     sensor = SDM630SimSensor(name, hass, config)
-    async_add_entities([sensor])
+    sensor.set_surplus_sensors(raw_surplus_sensor, reported_surplus_sensor)
+
+    async_add_entities([sensor, raw_surplus_sensor, reported_surplus_sensor])
+
+
+class SDM630RawSurplusSensor(RestoreSensor):
+    """Sensor exposing raw (unfiltered) surplus power in W."""
+
+    _attr_should_poll = False
+    _attr_native_unit_of_measurement = "W"
+    _attr_device_class = SensorDeviceClass.POWER
+
+    def __init__(self) -> None:
+        self._attr_name = "SDM Raw Surplus"
+        self._attr_unique_id = "sdm_raw_surplus"
+        self._attr_native_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_data = await self.async_get_last_sensor_data()
+        if last_data and last_data.native_value is not None:
+            try:
+                self._attr_native_value = float(last_data.native_value)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Could not restore raw surplus value: %r",
+                                last_data.native_value)
+
+    @callback
+    def update_value(self, value_w: float) -> None:
+        """Push a new surplus value (in W) — non-blocking, called from evaluation tick."""
+        self._attr_native_value = round(value_w, 1)
+        self.async_write_ha_state()
+
+
+class SDM630ReportedSurplusSensor(RestoreSensor):
+    """Sensor exposing reported (hysteresis-filtered) surplus power in W."""
+
+    _attr_should_poll = False
+    _attr_native_unit_of_measurement = "W"
+    _attr_device_class = SensorDeviceClass.POWER
+
+    def __init__(self) -> None:
+        self._attr_name = "SDM Reported Surplus"
+        self._attr_unique_id = "sdm_reported_surplus"
+        self._attr_native_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_data = await self.async_get_last_sensor_data()
+        if last_data and last_data.native_value is not None:
+            try:
+                self._attr_native_value = float(last_data.native_value)
+            except (ValueError, TypeError):
+                _LOGGER.warning("Could not restore reported surplus value: %r",
+                                last_data.native_value)
+
+    @callback
+    def update_value(self, value_w: float) -> None:
+        """Push a new surplus value (in W) — non-blocking, called from evaluation tick."""
+        self._attr_native_value = round(value_w, 1)
+        self.async_write_ha_state()
 
 
 class SDM630SimSensor(SensorEntity):
@@ -87,6 +154,17 @@ class SDM630SimSensor(SensorEntity):
         self._cache_key_to_entity: dict[str, str] = {}
         self._failsafe_reason_logged: str | None = None
         self._invalidation_reasons: dict[str, str] = {}
+        self._raw_surplus_sensor: SDM630RawSurplusSensor | None = None
+        self._reported_surplus_sensor: SDM630ReportedSurplusSensor | None = None
+
+    def set_surplus_sensors(
+        self,
+        raw_sensor: "SDM630RawSurplusSensor",
+        reported_sensor: "SDM630ReportedSurplusSensor",
+    ) -> None:
+        """Store references to the surplus dashboard sensors."""
+        self._raw_surplus_sensor = raw_sensor
+        self._reported_surplus_sensor = reported_sensor
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added to hass."""
@@ -355,6 +433,23 @@ class SDM630SimSensor(SensorEntity):
         input_data_block.set_float(TOTAL_POWER, result.reported_kw)
         self._attr_native_value = result.reported_kw
         self.async_write_ha_state()
+        self._update_surplus_sensors(result)
+
+    def _update_surplus_sensors(self, result: EvaluationResult) -> None:
+        """Push surplus values to dashboard sensors — non-blocking, fail-silent."""
+        try:
+            if self._raw_surplus_sensor is not None:
+                self._raw_surplus_sensor.update_value(result.real_surplus_kw * 1000)
+            if self._reported_surplus_sensor is not None:
+                self._reported_surplus_sensor.update_value(result.reported_kw * 1000)
+        except Exception:
+            _LOGGER.warning("Failed to update surplus sensors", exc_info=True)
+            return
+        _LOGGER.debug(
+            "SDM630 surplus sensors updated: raw=%.1fW reported=%.1fW",
+            result.real_surplus_kw * 1000,
+            result.reported_kw * 1000,
+        )
 
     @property
     def name(self):

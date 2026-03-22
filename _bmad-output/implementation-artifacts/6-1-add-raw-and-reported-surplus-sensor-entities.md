@@ -1,6 +1,6 @@
 # Story 6.1: Add Raw and Reported Surplus Sensor Entities
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -49,24 +49,24 @@ registered)
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create `SDM630RawSurplusSensor` class (AC: #1, #2, #3, #4)
-  - [ ] 1.1 Add class extending `RestoreSensor` in `sensor.py`
-  - [ ] 1.2 Set `_attr_should_poll = False`
-  - [ ] 1.3 Set `_attr_native_unit_of_measurement = "W"`
-  - [ ] 1.4 Set `_attr_device_class = SensorDeviceClass.POWER`
-  - [ ] 1.5 Set `_attr_unique_id = "sdm_raw_surplus"`
-  - [ ] 1.6 Implement `async_added_to_hass` with `async_get_last_sensor_data()`
-- [ ] Task 2: Create `SDM630ReportedSurplusSensor` class (AC: #1, #2, #3, #4)
-  - [ ] 2.1 Same structure as Task 1 but for reported surplus
-  - [ ] 2.2 Set `_attr_unique_id = "sdm_reported_surplus"`
-- [ ] Task 3: Wire sensors into `async_setup_platform` (AC: #1)
-  - [ ] 3.1 Instantiate both new sensors in `async_setup_platform`
-  - [ ] 3.2 Pass all three entities (existing + two new) to `async_add_entities`
-- [ ] Task 4: Add surplus sensor update to evaluation tick (AC: #1, #2, #4)
-  - [ ] 4.1 After `_write_result()` in `_evaluation_tick`, call update method on both surplus sensors
-  - [ ] 4.2 The update must be synchronous (`@callback` decorated), no `await`
-  - [ ] 4.3 Wrap update in try/except with `_LOGGER.warning()` on failure
-  - [ ] 4.4 Add `_LOGGER.debug` for new sensor values
+- [x] Task 1: Create `SDM630RawSurplusSensor` class (AC: #1, #2, #3, #4)
+  - [x] 1.1 Add class extending `RestoreSensor` in `sensor.py`
+  - [x] 1.2 Set `_attr_should_poll = False`
+  - [x] 1.3 Set `_attr_native_unit_of_measurement = "W"`
+  - [x] 1.4 Set `_attr_device_class = SensorDeviceClass.POWER`
+  - [x] 1.5 Set `_attr_unique_id = "sdm_raw_surplus"`
+  - [x] 1.6 Implement `async_added_to_hass` with `async_get_last_sensor_data()`
+- [x] Task 2: Create `SDM630ReportedSurplusSensor` class (AC: #1, #2, #3, #4)
+  - [x] 2.1 Same structure as Task 1 but for reported surplus
+  - [x] 2.2 Set `_attr_unique_id = "sdm_reported_surplus"`
+- [x] Task 3: Wire sensors into `async_setup_platform` (AC: #1)
+  - [x] 3.1 Instantiate both new sensors in `async_setup_platform`
+  - [x] 3.2 Pass all three entities (existing + two new) to `async_add_entities`
+- [x] Task 4: Add surplus sensor update to evaluation tick (AC: #1, #2, #4)
+  - [x] 4.1 After `_write_result()` in `_evaluation_tick`, call update method on both surplus sensors
+  - [x] 4.2 The update must be synchronous (`@callback` decorated), no `await`
+  - [x] 4.3 Wrap update in try/except with `_LOGGER.warning()` on failure
+  - [x] 4.4 Add `_LOGGER.debug` for new sensor values
 
 ## Dev Notes
 
@@ -212,16 +212,29 @@ Note: `SensorEntity` is already imported — just add `RestoreSensor` and `Senso
 
 ### Agent Model Used
 
-(to be filled by dev agent)
+Claude Sonnet 4.6
 
 ### Completion Notes List
 
-(to be filled by dev agent)
+- Added `RestoreSensor`, `SensorDeviceClass` to `homeassistant.components.sensor` import
+- `SDM630RawSurplusSensor` (extends `RestoreSensor`): `unique_id=sdm_raw_surplus`, `device_class=POWER`, `unit=W`, `should_poll=False`; `async_added_to_hass` restores last value; `@callback update_value()` writes rounded W value and calls `async_write_ha_state()`
+- `SDM630ReportedSurplusSensor`: identical structure, `unique_id=sdm_reported_surplus`
+- `SDM630SimSensor.__init__` extended with `_raw_surplus_sensor` and `_reported_surplus_sensor` (both `None`)
+- `set_surplus_sensors()` stores both references on the `SDM630SimSensor` instance
+- `_update_surplus_sensors()` called inside `_write_result()` — covers all three `_write_result` call sites (stale/failsafe, range-fail, success); wrapped in try/except with `_LOGGER.warning`; logs DEBUG with W values
+- `async_setup_platform` creates both sensors, calls `set_surplus_sensors()`, passes all three to `async_add_entities()`
+- Test stubs updated in `test_sensor.py`, `test_range_validation.py`, `test_surplus_engine_staleness.py`: added `_RestoreSensor`, `SensorDeviceClass` stubs to `ha_sensor_m`
+- `test_setup_platform_passes_config_to_sensor` updated: expects 3 entities, verifies types for indices 1 and 2
+- 363 tests pass, 0 failures
 
 ### Change Log
 
-(to be filled by dev agent)
+- 2026-03-22: Implemented Story 6-1 — added `SDM630RawSurplusSensor`, `SDM630ReportedSurplusSensor` to `sensor.py`; wired into `async_setup_platform`; hooked update into `_write_result()`; updated test stubs and setup-platform test
+- 2026-03-22: Code Review fixes — guarded `float()` in `async_added_to_hass` with `try/except (ValueError, TypeError)`; moved `_LOGGER.debug` outside try-block in `_update_surplus_sensors` so it only fires on success
 
 ### File List
 
-- `sensor.py` — Add `SDM630RawSurplusSensor`, `SDM630ReportedSurplusSensor`, wire into `async_setup_platform`, update from `_evaluation_tick`
+- `sensor.py` — Add `SDM630RawSurplusSensor`, `SDM630ReportedSurplusSensor`, wire into `async_setup_platform`, update from `_write_result()`
+- `tests/test_sensor.py` — Add `RestoreSensor`/`SensorDeviceClass` stubs; update `test_setup_platform_passes_config_to_sensor` for 3 entities
+- `tests/test_range_validation.py` — Add `RestoreSensor`/`SensorDeviceClass` stubs
+- `tests/test_surplus_engine_staleness.py` — Add `RestoreSensor`/`SensorDeviceClass` stubs

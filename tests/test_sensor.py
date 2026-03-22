@@ -73,6 +73,17 @@ def sensor_ctx():
 
     ha_sensor_m.SensorEntity = _SensorEntity
 
+    class _RestoreSensor(_SensorEntity):
+        async def async_added_to_hass(self):
+            pass
+
+        async def async_get_last_sensor_data(self):
+            return None
+
+    ha_sensor_m.RestoreSensor = _RestoreSensor
+    ha_sensor_m.SensorDeviceClass = MagicMock()
+    ha_sensor_m.SensorDeviceClass.POWER = "power"
+
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.CONF_NAME          = "name"
     ha_const.STATE_UNAVAILABLE  = "unavailable"
@@ -841,10 +852,12 @@ class TestSetupPlatform:
             added_entities.extend(entities)
 
         asyncio.run(mod.async_setup_platform(mock_hass, sample_config, _add))
-        assert len(added_entities) == 1
+        assert len(added_entities) == 3
         sensor = added_entities[0]
         assert isinstance(sensor, mod.SDM630SimSensor)
         assert sensor._config is sample_config
+        assert isinstance(added_entities[1], mod.SDM630RawSurplusSensor)
+        assert isinstance(added_entities[2], mod.SDM630ReportedSurplusSensor)
 
 
 # ===========================================================================

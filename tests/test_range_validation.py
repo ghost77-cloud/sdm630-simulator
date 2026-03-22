@@ -92,6 +92,17 @@ def sensor_ctx():
 
     ha_sensor_m.SensorEntity = _SensorEntity
 
+    class _RestoreSensor(_SensorEntity):
+        async def async_added_to_hass(self):
+            pass
+
+        async def async_get_last_sensor_data(self):
+            return None
+
+    ha_sensor_m.RestoreSensor = _RestoreSensor
+    ha_sensor_m.SensorDeviceClass = MagicMock()
+    ha_sensor_m.SensorDeviceClass.POWER = "power"
+
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.CONF_NAME         = "name"
     ha_const.STATE_UNAVAILABLE = "unavailable"
