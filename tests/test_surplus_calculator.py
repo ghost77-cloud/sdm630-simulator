@@ -741,3 +741,136 @@ class TestHardSocFloorEnforcement:
         ]
         assert len(clamp_warnings) == 1
 
+
+# ===========================================================================
+# Story 5.1 — AC2: Required 11 test functions (standalone, using se + conftest)
+# ===========================================================================
+
+from datetime import datetime, timezone  # noqa: E402 (after class definitions)
+
+
+def test_normal_sunny_day(se, make_snapshot, base_config):
+    """PV=8000W, user=1200W, SOC=100% → real_surplus=6.8, buffer=0, ACTIVE."""
+    snapshot = make_snapshot(soc_percent=100.0, pv_production_w=8000.0, power_to_user_w=1200.0)
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.real_surplus_kw == pytest.approx(6.8)
+    assert result.buffer_used_kw == pytest.approx(0.0)
+    assert result.reported_kw == pytest.approx(6.8)
+    assert result.charging_state == "ACTIVE"
+
+
+def test_cloudy_buffer_fills_gap(se, make_snapshot, base_config):
+    """PV=3500W, user=1200W, SOC=95%, floor=50 (midday) → buffer fills 1.9 kW gap → ACTIVE."""
+    snapshot = make_snapshot(soc_percent=95.0, pv_production_w=3500.0, power_to_user_w=1200.0)
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.real_surplus_kw == pytest.approx(2.3)
+    assert result.buffer_used_kw == pytest.approx(1.9)
+    assert result.reported_kw == pytest.approx(4.2)
+    assert result.charging_state == "ACTIVE"
+
+
+def test_soc_at_hard_floor_no_buffer(se, make_snapshot, base_config):
+    """PV=2000W, user=1000W, SOC=50% → soc_headroom=0 → buffer=0, INACTIVE."""
+    snapshot = make_snapshot(soc_percent=50.0, pv_production_w=2000.0, power_to_user_w=1000.0)
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.buffer_used_kw == pytest.approx(0.0)
+    assert result.reported_kw == pytest.approx(0.0)
+    assert result.charging_state == "INACTIVE"
+
+
+def test_soc_below_hard_floor_failsafe(se, make_snapshot, base_config):
+    """SOC=48% < SOC_HARD_FLOOR (50) → FAILSAFE guard fires immediately."""
+    snapshot = make_snapshot(soc_percent=48.0, pv_production_w=8000.0, power_to_user_w=1200.0)
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.reported_kw == pytest.approx(0.0)
+    assert result.charging_state == "FAILSAFE"
+    assert "hard floor" in result.reason.lower()
+    assert result.buffer_used_kw == pytest.approx(0.0)
+
+
+def test_time_window_morning_floor_100(se, make_snapshot, base_config):
+    """timestamp=09:00 (before 11:00) → first rule matches → floor=100."""
+    snapshot = make_snapshot(timestamp=datetime(2026, 3, 15, 9, 0, tzinfo=timezone.utc))
+    calc = se.SurplusCalculator(base_config)
+    assert calc.get_soc_floor(snapshot) == 100
+
+
+def test_time_window_free_window_floor_50(se, make_snapshot, base_config):
+    """timestamp=12:30, sunset=18:00 → after 11:00, before 15:00=sunset-3h → floor=50."""
+    snapshot = make_snapshot(
+        timestamp=datetime(2026, 3, 15, 12, 30, tzinfo=timezone.utc),
+        sunset_time=datetime(2026, 3, 15, 18, 0, tzinfo=timezone.utc),
+    )
+    calc = se.SurplusCalculator(base_config)
+    assert calc.get_soc_floor(snapshot) == 50
+
+
+def test_time_window_evening_floor_80(se, make_snapshot, base_config):
+    """timestamp=16:00, sunset=18:00 → past 15:00=sunset-3h → default rule → seasonal[3]=80."""
+    snapshot = make_snapshot(
+        timestamp=datetime(2026, 3, 15, 16, 0, tzinfo=timezone.utc),
+        sunset_time=datetime(2026, 3, 15, 18, 0, tzinfo=timezone.utc),
+    )
+    calc = se.SurplusCalculator(base_config)
+    assert calc.get_soc_floor(snapshot) == 80
+
+
+def test_time_window_no_sunset_uses_default(se, make_snapshot, base_config):
+    """sunset_time=None → 'sunset-3h' token unresolvable → rule skipped → default → floor=80."""
+    snapshot = make_snapshot(
+        timestamp=datetime(2026, 3, 15, 13, 0, tzinfo=timezone.utc),
+        sunset_time=None,  # explicit None — NOT the default 18:00
+    )
+    calc = se.SurplusCalculator(base_config)
+    assert calc.get_soc_floor(snapshot) == 80
+
+
+def test_forecast_good_floor_unchanged(se, make_snapshot, base_config):
+    """cloud=10 (<20), hour=9 (<15) → forecast_good, floor stays 100 (morning window)."""
+    snapshot = make_snapshot(
+        timestamp=datetime(2026, 3, 15, 9, 0, tzinfo=timezone.utc),
+        pv_production_w=8000.0,
+        soc_percent=80.0,
+        forecast=se.ForecastData(forecast_available=True, cloud_coverage_avg=10.0),
+    )
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.forecast_available is True
+    assert "forecast_good" in result.reason
+    assert result.soc_floor_active == 100
+
+
+def test_forecast_poor_floor_raised(se, make_snapshot, base_config):
+    """cloud=85 (>70), hour=14 (>=13) → forecast_poor, floor raised 50→80 (seasonal[3])."""
+    snapshot = make_snapshot(
+        timestamp=datetime(2026, 3, 15, 14, 0, tzinfo=timezone.utc),
+        sunset_time=datetime(2026, 3, 15, 18, 0, tzinfo=timezone.utc),
+        pv_production_w=3500.0,
+        soc_percent=80.0,
+        forecast=se.ForecastData(forecast_available=True, cloud_coverage_avg=85.0),
+    )
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.forecast_available is True
+    assert "forecast_poor" in result.reason
+    assert result.soc_floor_active == 80  # raised from midday floor=50 to seasonal=80
+
+
+def test_forecast_unavailable_conservative(se, make_snapshot, base_config):
+    """ForecastData(forecast_available=False) → no crash, floor unchanged, no exception."""
+    snapshot = make_snapshot(
+        pv_production_w=8000.0,
+        soc_percent=80.0,
+        forecast=se.ForecastData(forecast_available=False),
+    )
+    calc = se.SurplusCalculator(base_config)
+    result = calc.calculate_surplus(snapshot)
+    assert result.forecast_available is False
+    assert result.charging_state in ("ACTIVE", "INACTIVE")
+    # Floor must not exceed base time-window value (midday=50, no forecast forcing)
+    assert result.soc_floor_active == 50
+
