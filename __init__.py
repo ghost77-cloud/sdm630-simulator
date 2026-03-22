@@ -51,6 +51,7 @@ CONF_STALE_THRESHOLD_SECONDS = "stale_threshold_seconds"
 CONF_MAX_DISCHARGE_KW     = "max_discharge_kw"
 CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"
 CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"
+CONF_MAX_INVERTER_OUTPUT_KW = "max_inverter_output_kw"
 CONF_SENSOR_RANGES        = "sensor_ranges"   # optional; keys: soc, power_w
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ DEFAULTS: dict = {
     "stale_threshold_seconds": 60,
     "max_discharge_kw": 10.0,
     "battery_capacity_kwh": 10.0,
+    "max_inverter_output_kw": 10.0,
     "solar_remaining_threshold_kwh": 2.0,
     # sensor_ranges: plausible value bounds for cache validation (Story 4.4)
     # Override in YAML with sensor_ranges: { soc: [0, 100], power_w: [-30000, 30000] }
@@ -136,6 +138,7 @@ COMPONENT_SCHEMA = vol.Schema(
         vol.Optional(CONF_STALE_THRESHOLD_SECONDS): int,
         vol.Optional(CONF_MAX_DISCHARGE_KW):      vol.Coerce(float),
         vol.Optional(CONF_BATTERY_CAPACITY_KWH):  vol.Coerce(float),
+        vol.Optional(CONF_MAX_INVERTER_OUTPUT_KW): vol.Coerce(float),
         vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float),
         vol.Optional(CONF_SENSOR_RANGES):          SENSOR_RANGES_SCHEMA,
     },
@@ -159,7 +162,8 @@ async def async_setup(hass, config):
     _SCALAR_KEYS = {
         "evaluation_interval", "wallbox_threshold_kw", "wallbox_min_kw",
         "hold_time_minutes", "soc_hard_floor", "stale_threshold_seconds",
-        "max_discharge_kw", "battery_capacity_kwh", "solar_remaining_threshold_kwh",
+        "max_discharge_kw", "battery_capacity_kwh", "max_inverter_output_kw",
+        "solar_remaining_threshold_kwh",
     }
     cfg: dict = {}
     for key in _SCALAR_KEYS:

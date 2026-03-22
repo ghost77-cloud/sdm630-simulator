@@ -74,6 +74,9 @@ sdm630_sim:
   max_discharge_kw: 10.0         # Max. Entladerate (kW)
   soc_hard_floor: 50             # Absoluter SOC-Mindeststand (%)
 
+  # -- Wechselrichter --
+  max_inverter_output_kw: 10.0   # Max. Wechselrichter-Output (kW)
+
   # -- Staleness / Sicherheit --
   stale_threshold_seconds: 60    # Sensor-Staleness-Timeout (s)
 
@@ -180,7 +183,8 @@ Eine fertige Lovelace-Card-Konfiguration liegt unter
 4. **Speichern**
 
 Keine HACS-Installation oder Drittanbieter-Karten nötig — die Karte
-verwendet nur die eingebauten Kartentypen `conditional` und `entities`.
+verwendet nur die eingebauten Kartentypen `vertical-stack`,
+`conditional` und `entities`.
 
 ### Warn-Schwelle ändern
 

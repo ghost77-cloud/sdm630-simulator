@@ -248,6 +248,15 @@ class SurplusCalculator:
                                 max(0.0, wallbox_threshold_kw - real_surplus_kw))
         augmented_kw      = real_surplus_kw + buffer_used_kw
 
+        # Cap at inverter maximum output (house load + wallbox <= inverter max)
+        max_inverter_kw = self.config.get("max_inverter_output_kw", 10.0)
+        if augmented_kw > max_inverter_kw:
+            _LOGGER.debug(
+                "SDM630 Eval: capping surplus %.2fkW to inverter max %.2fkW",
+                augmented_kw, max_inverter_kw,
+            )
+            augmented_kw = max_inverter_kw
+
         forecast_available = (
             snapshot.forecast.forecast_available if snapshot.forecast else False
         )
