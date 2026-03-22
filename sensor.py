@@ -290,6 +290,20 @@ class SDM630SimSensor(SensorEntity):
                 )
             )
 
+        # Seed cache with current state of all tracked entities so that
+        # sensors which already have a value at startup don't stay empty
+        # until their next state_changed event.
+        for entity_id, cache_key in self._entity_to_cache_key.items():
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                continue
+            try:
+                self._sensor_cache[cache_key] = (
+                    float(state.state), state.last_changed, True
+                )
+            except (ValueError, TypeError):
+                pass
+
         interval = timedelta(seconds=self._config.get("evaluation_interval", 15))
         self.async_on_remove(
             async_track_time_interval(self.hass, self._evaluation_tick, interval)
