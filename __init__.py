@@ -145,9 +145,8 @@ COMPONENT_SCHEMA = vol.Schema(
     extra=vol.ALLOW_EXTRA,
 )
 
-# Key in configuration.yaml is "sdm630_sim" (NOT DOMAIN); see Dev Notes.
 CONFIG_SCHEMA = vol.Schema(
-    {"sdm630_sim": COMPONENT_SCHEMA},
+    {DOMAIN: COMPONENT_SCHEMA},
     extra=vol.ALLOW_EXTRA,
 )
 
@@ -156,7 +155,7 @@ CONFIG_SCHEMA = vol.Schema(
 
 async def async_setup(hass, config):
     """Set up the SDM630 simulator component."""
-    raw_cfg: dict = config.get("sdm630_sim", {})
+    raw_cfg: dict = config.get(DOMAIN, {})
 
     # -- Apply scalar DEFAULTS (skip nested dicts handled separately below) --
     _SCALAR_KEYS = {
@@ -189,7 +188,8 @@ async def async_setup(hass, config):
         else:
             if raw_ranges:  # user supplied partial sensor_ranges block
                 _LOGGER.warning(
-                    "sdm630_sim: sensor_ranges.%s missing \u2014 using default %s",
+                    "%s: sensor_ranges.%s missing \u2014 using default %s",
+                    DOMAIN,
                     sub_key,
                     default_ranges[sub_key],
                 )
@@ -201,7 +201,8 @@ async def async_setup(hass, config):
 
     if CONF_SOC not in entities_cfg:
         _LOGGER.error(
-            "sdm630_sim: required entity 'soc' missing — entering FAILSAFE mode"
+            "%s: required entity 'soc' missing — entering FAILSAFE mode",
+            DOMAIN,
         )
         cfg["failsafe"] = True
     else:
@@ -210,7 +211,8 @@ async def async_setup(hass, config):
     for optional_key in (CONF_WEATHER, CONF_FORECAST_SOLAR):
         if optional_key not in entities_cfg:
             _LOGGER.warning(
-                "sdm630_sim: optional entity '%s' not configured — degraded mode",
+                "%s: optional entity '%s' not configured — degraded mode",
+                DOMAIN,
                 optional_key,
             )
 

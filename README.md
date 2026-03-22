@@ -42,7 +42,7 @@ Die Sensordaten des Wechselrichters liefert
 ### Minimale Konfiguration
 
 ```yaml
-sdm630_sim:
+sdm630_simulator:
   entities:
     soc: sensor.growatt_battery_soc
     power_to_grid: sensor.growatt_export_power
@@ -53,7 +53,7 @@ sdm630_sim:
 ### Vollständige Konfiguration mit allen Optionen
 
 ```yaml
-sdm630_sim:
+sdm630_simulator:
   # -- Pflicht-Entitäten --
   entities:
     soc: sensor.growatt_battery_soc             # Batterieladung (%)

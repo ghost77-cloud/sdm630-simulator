@@ -78,7 +78,7 @@ addresses = first register of a 32-bit pair.
 
 - **Install**: Copy to `custom_components/sdm630_simulator/` in Home
   Assistant
-- **Configure**: Add `sdm630_sim:` block to `configuration.yaml`,
+- **Configure**: Add `sdm630_simulator:` block to `configuration.yaml`,
   restart HA
 - **Dependencies**: `pip install pymodbus>=3.11.1`
 - **Dev dependencies**: `pip install -r requirements-dev.txt`
