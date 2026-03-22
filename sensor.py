@@ -1,5 +1,9 @@
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.components.sensor import (
     RestoreSensor,
     SensorDeviceClass,
@@ -46,6 +50,8 @@ ENTITY_ROLE_TO_CACHE_KEY = {
     "power_to_user": CACHE_KEY_POWER_TO_USER,
 }
 
+WALLBOX_POLL_WARNING_THRESHOLD: int = 300  # seconds
+
 
 async def start_modbus_server():
     """Start the Modbus server asynchronously."""
@@ -73,13 +79,21 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
 
     raw_surplus_sensor = SDM630RawSurplusSensor()
     reported_surplus_sensor = SDM630ReportedSurplusSensor()
+    poll_warning_sensor = SDM630WallboxPollWarningSensor()
     wallbox_last_poll_sensor = SDM630WallboxLastPollSensor()
+    wallbox_last_poll_sensor.set_warning_sensor(poll_warning_sensor)
     input_data_block.set_poll_callback(wallbox_last_poll_sensor.on_poll)
 
     sensor = SDM630SimSensor(name, hass, config)
     sensor.set_surplus_sensors(raw_surplus_sensor, reported_surplus_sensor)
 
-    async_add_entities([sensor, raw_surplus_sensor, reported_surplus_sensor, wallbox_last_poll_sensor])
+    async_add_entities([
+        sensor,
+        raw_surplus_sensor,
+        reported_surplus_sensor,
+        wallbox_last_poll_sensor,
+        poll_warning_sensor,
+    ])
 
 
 class SDM630RawSurplusSensor(RestoreSensor):
@@ -150,6 +164,11 @@ class SDM630WallboxLastPollSensor(RestoreSensor):
         self._attr_name = "SDM Wallbox Last Poll"
         self._attr_unique_id = "sdm_wallbox_last_poll"
         self._attr_native_value = None  # datetime | None
+        self._poll_warning_sensor: "SDM630WallboxPollWarningSensor | None" = None
+
+    def set_warning_sensor(self, sensor: "SDM630WallboxPollWarningSensor") -> None:
+        """Wire the warning sensor so on_poll can notify it."""
+        self._poll_warning_sensor = sensor
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -164,11 +183,58 @@ class SDM630WallboxLastPollSensor(RestoreSensor):
     def on_poll(self) -> None:
         """Called by Modbus poll hook — runs in HA event loop, must be non-blocking."""
         try:
-            self._attr_native_value = dt_util.utcnow()
+            now = dt_util.utcnow()
+            self._attr_native_value = now
             self.async_write_ha_state()
-            _LOGGER.debug("SDM Wallbox last poll updated: %s", self._attr_native_value)
+            if self._poll_warning_sensor is not None:
+                self._poll_warning_sensor.set_last_poll_dt(now)
+            _LOGGER.debug("SDM Wallbox last poll updated: %s", now)
         except Exception:  # noqa: BLE001
             _LOGGER.warning("Failed to update sdm_wallbox_last_poll sensor", exc_info=True)
+
+
+class SDM630WallboxPollWarningSensor(BinarySensorEntity):
+    """Binary sensor that turns on when no wallbox poll has been received for >= 5 min."""
+
+    _attr_should_poll = False
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self) -> None:
+        self._attr_name = "SDM Wallbox Poll Warning"
+        self._attr_unique_id = "sdm_wallbox_poll_warning"
+        self._attr_is_on = False
+        self._last_poll_dt: datetime | None = None
+
+    def set_last_poll_dt(self, dt: datetime) -> None:
+        """Called by SDM630WallboxLastPollSensor.on_poll — non-blocking, no I/O."""
+        self._last_poll_dt = dt
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_track_time_interval(
+                self.hass,
+                self._evaluate_warning,
+                timedelta(seconds=60),
+            )
+        )
+
+    @callback
+    def _evaluate_warning(self, now) -> None:
+        if self._last_poll_dt is None:
+            is_on = False
+        else:
+            elapsed = (now - self._last_poll_dt).total_seconds()
+            is_on = elapsed >= WALLBOX_POLL_WARNING_THRESHOLD
+        if is_on != self._attr_is_on:
+            self._attr_is_on = is_on
+            self.async_write_ha_state()
+            _LOGGER.debug(
+                "SDM Wallbox poll warning → %s (elapsed=%s s)",
+                "ON" if is_on else "OFF",
+                None if self._last_poll_dt is None
+                else int((now - self._last_poll_dt).total_seconds()),
+            )
 
 
 class SDM630SimSensor(SensorEntity):

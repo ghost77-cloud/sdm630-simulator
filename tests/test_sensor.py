@@ -53,6 +53,7 @@ def sensor_ctx():
     # ── HA stubs ──────────────────────────────────────────────────────────
     ha_comps    = types.ModuleType("homeassistant.components")
     ha_sensor_m = types.ModuleType("homeassistant.components.sensor")
+    ha_binary_sensor_m = types.ModuleType("homeassistant.components.binary_sensor")
 
     class _SensorEntity:
         _attr_name = None
@@ -83,6 +84,27 @@ def sensor_ctx():
     ha_sensor_m.RestoreSensor = _RestoreSensor
     ha_sensor_m.SensorDeviceClass = MagicMock()
     ha_sensor_m.SensorDeviceClass.POWER = "power"
+
+    class _BinarySensorEntity:
+        _attr_name = None
+        _attr_unique_id = None
+        _attr_should_poll = True
+        _attr_is_on = False
+        _attr_device_class = None
+        hass = None
+
+        async def async_added_to_hass(self):
+            pass
+
+        def async_on_remove(self, func):
+            pass
+
+        def async_write_ha_state(self):
+            pass
+
+    ha_binary_sensor_m.BinarySensorEntity = _BinarySensorEntity
+    ha_binary_sensor_m.BinarySensorDeviceClass = MagicMock()
+    ha_binary_sensor_m.BinarySensorDeviceClass.PROBLEM = "problem"
 
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.CONF_NAME          = "name"
@@ -141,19 +163,20 @@ def sensor_ctx():
 
     # ── sys.modules installation ──────────────────────────────────────────
     new_modules: dict = {
-        "homeassistant.components":             ha_comps,
-        "homeassistant.components.sensor":      ha_sensor_m,
-        "homeassistant.const":                  ha_const,
-        "homeassistant.core":                   ha_core,
-        "homeassistant.helpers.event":          ha_event,
-        "homeassistant.util":                   ha_util,
-        "homeassistant.util.dt":                ha_util_dt,
-        "pymodbus":                             pymodbus,
-        "pymodbus.server":                      pymodbus_server,
-        "pymodbus.framer":                      pymodbus_framer,
-        f"{PKG}.modbus_server":                 pkg_modbus,
-        f"{PKG}.sdm630_input_registers":        pkg_regs,
-        f"{PKG}.surplus_engine":                pkg_se,
+        "homeassistant.components":                  ha_comps,
+        "homeassistant.components.sensor":           ha_sensor_m,
+        "homeassistant.components.binary_sensor":    ha_binary_sensor_m,
+        "homeassistant.const":                       ha_const,
+        "homeassistant.core":                        ha_core,
+        "homeassistant.helpers.event":               ha_event,
+        "homeassistant.util":                        ha_util,
+        "homeassistant.util.dt":                     ha_util_dt,
+        "pymodbus":                                  pymodbus,
+        "pymodbus.server":                           pymodbus_server,
+        "pymodbus.framer":                           pymodbus_framer,
+        f"{PKG}.modbus_server":                      pkg_modbus,
+        f"{PKG}.sdm630_input_registers":             pkg_regs,
+        f"{PKG}.surplus_engine":                     pkg_se,
     }
 
     saved = {k: sys.modules.get(k) for k in new_modules}
@@ -852,13 +875,14 @@ class TestSetupPlatform:
             added_entities.extend(entities)
 
         asyncio.run(mod.async_setup_platform(mock_hass, sample_config, _add))
-        assert len(added_entities) == 4
+        assert len(added_entities) == 5
         sensor = added_entities[0]
         assert isinstance(sensor, mod.SDM630SimSensor)
         assert sensor._config is sample_config
         assert isinstance(added_entities[1], mod.SDM630RawSurplusSensor)
         assert isinstance(added_entities[2], mod.SDM630ReportedSurplusSensor)
         assert isinstance(added_entities[3], mod.SDM630WallboxLastPollSensor)
+        assert isinstance(added_entities[4], mod.SDM630WallboxPollWarningSensor)
 
 
 # ===========================================================================

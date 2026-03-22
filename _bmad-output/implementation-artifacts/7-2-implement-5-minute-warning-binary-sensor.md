@@ -1,6 +1,6 @@
 # Story 7.2: Implement 5-Minute Warning Binary Sensor
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -45,25 +45,25 @@ simultaneously
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `WALLBOX_POLL_WARNING_THRESHOLD` constant to `sensor.py` (AC: #1, #2)
-  - [ ] 1.1 Add `WALLBOX_POLL_WARNING_THRESHOLD: int = 300` at module level (after existing constants)
-- [ ] Task 2: Add `SDM630WallboxPollWarningSensor` class to `sensor.py` (AC: #1, #2, #3, #4, #5)
-  - [ ] 2.1 Add class extending `BinarySensorEntity`
-  - [ ] 2.2 Set `_attr_should_poll = False`
-  - [ ] 2.3 Set `_attr_device_class = BinarySensorDeviceClass.PROBLEM`
-  - [ ] 2.4 Set `_attr_unique_id = "sdm_wallbox_poll_warning"`
-  - [ ] 2.5 Set `_attr_name = "SDM Wallbox Poll Warning"`
-  - [ ] 2.6 Initialize `self._last_poll_dt: datetime | None = None` in `__init__`
-  - [ ] 2.7 Add `set_last_poll_dt(dt: datetime) -> None` method for the last-poll sensor to call
-  - [ ] 2.8 Add `_evaluate_warning(now) -> None` method (the interval callback): compute `is_on`, update `_attr_is_on`, call `async_write_ha_state()` — non-blocking
-  - [ ] 2.9 Implement `async_added_to_hass`: register `async_track_time_interval` with 60-second interval calling `_evaluate_warning`; unsubscribe on remove via `self.async_on_remove`
-- [ ] Task 3: Wire last-poll sensor → warning sensor in `async_setup_platform` (AC: #3)
-  - [ ] 3.1 Instantiate `SDM630WallboxPollWarningSensor` in `async_setup_platform`
-  - [ ] 3.2 Pass `poll_warning_sensor` reference to `SDM630WallboxLastPollSensor` so `on_poll` calls `poll_warning_sensor.set_last_poll_dt(dt_util.utcnow())`
-  - [ ] 3.3 Add `poll_warning_sensor` to `async_add_entities`
-- [ ] Task 4: Add required imports to `sensor.py` (AC: all)
-  - [ ] 4.1 Add `BinarySensorDeviceClass` and `BinarySensorEntity` imports
-  - [ ] 4.2 Add `datetime` to imports from `datetime` module
+- [x] Task 1: Add `WALLBOX_POLL_WARNING_THRESHOLD` constant to `sensor.py` (AC: #1, #2)
+  - [x] 1.1 Add `WALLBOX_POLL_WARNING_THRESHOLD: int = 300` at module level (after existing constants)
+- [x] Task 2: Add `SDM630WallboxPollWarningSensor` class to `sensor.py` (AC: #1, #2, #3, #4, #5)
+  - [x] 2.1 Add class extending `BinarySensorEntity`
+  - [x] 2.2 Set `_attr_should_poll = False`
+  - [x] 2.3 Set `_attr_device_class = BinarySensorDeviceClass.PROBLEM`
+  - [x] 2.4 Set `_attr_unique_id = "sdm_wallbox_poll_warning"`
+  - [x] 2.5 Set `_attr_name = "SDM Wallbox Poll Warning"`
+  - [x] 2.6 Initialize `self._last_poll_dt: datetime | None = None` in `__init__`
+  - [x] 2.7 Add `set_last_poll_dt(dt: datetime) -> None` method for the last-poll sensor to call
+  - [x] 2.8 Add `_evaluate_warning(now) -> None` method (the interval callback): compute `is_on`, update `_attr_is_on`, call `async_write_ha_state()` — non-blocking
+  - [x] 2.9 Implement `async_added_to_hass`: register `async_track_time_interval` with 60-second interval calling `_evaluate_warning`; unsubscribe on remove via `self.async_on_remove`
+- [x] Task 3: Wire last-poll sensor → warning sensor in `async_setup_platform` (AC: #3)
+  - [x] 3.1 Instantiate `SDM630WallboxPollWarningSensor` in `async_setup_platform`
+  - [x] 3.2 Pass `poll_warning_sensor` reference to `SDM630WallboxLastPollSensor` so `on_poll` calls `poll_warning_sensor.set_last_poll_dt(dt_util.utcnow())`
+  - [x] 3.3 Add `poll_warning_sensor` to `async_add_entities`
+- [x] Task 4: Add required imports to `sensor.py` (AC: all)
+  - [x] 4.1 Add `BinarySensorDeviceClass` and `BinarySensorEntity` imports
+  - [x] 4.2 Add `datetime` to imports from `datetime` module
 
 ## Dev Notes
 
@@ -283,6 +283,20 @@ Claude Sonnet 4.6
 
 ### Debug Log References
 
+- Updated three test fixtures (`test_sensor.py`, `test_range_validation.py`, `test_surplus_engine_staleness.py`) to stub `homeassistant.components.binary_sensor` — required because `sensor.py` now imports `BinarySensorEntity` and `BinarySensorDeviceClass`.
+- Updated `TestSetupPlatform::test_setup_platform_passes_config_to_sensor` to assert 5 entities (was 4) and validate `SDM630WallboxPollWarningSensor` is the 5th entity.
+- Used post-construction setter (`set_warning_sensor`) to wire `SDM630WallboxLastPollSensor` → `SDM630WallboxPollWarningSensor`, minimising changes to `SDM630WallboxLastPollSensor.__init__`.
+
 ### Completion Notes List
 
+- All 363 tests pass.
+- Only `sensor.py` modified (production code); three test fixtures updated for stub completeness.
+- `_evaluate_warning` only calls `async_write_ha_state()` when state actually changes (optimisation over spec).
+- Story 7-1 status was already `done` in its own file but showed `ready-for-dev` in sprint-status.yaml — corrected in sprint-status update.
+
 ### File List
+
+- `sensor.py` — added imports, constant, `SDM630WallboxPollWarningSensor` class, wiring in `async_setup_platform`, `SDM630WallboxLastPollSensor` extension
+- `tests/test_sensor.py` — binary_sensor stub + entity count assertion update
+- `tests/test_range_validation.py` — binary_sensor stub
+- `tests/test_surplus_engine_staleness.py` — binary_sensor stub

@@ -72,6 +72,7 @@ def sensor_ctx():
 
     ha_comps    = types.ModuleType("homeassistant.components")
     ha_sensor_m = types.ModuleType("homeassistant.components.sensor")
+    ha_binary_sensor_m = types.ModuleType("homeassistant.components.binary_sensor")
 
     class _SensorEntity:
         _attr_name = None
@@ -102,6 +103,27 @@ def sensor_ctx():
     ha_sensor_m.RestoreSensor = _RestoreSensor
     ha_sensor_m.SensorDeviceClass = MagicMock()
     ha_sensor_m.SensorDeviceClass.POWER = "power"
+
+    class _BinarySensorEntity:
+        _attr_name = None
+        _attr_unique_id = None
+        _attr_should_poll = True
+        _attr_is_on = False
+        _attr_device_class = None
+        hass = None
+
+        async def async_added_to_hass(self):
+            pass
+
+        def async_on_remove(self, func):
+            pass
+
+        def async_write_ha_state(self):
+            pass
+
+    ha_binary_sensor_m.BinarySensorEntity = _BinarySensorEntity
+    ha_binary_sensor_m.BinarySensorDeviceClass = MagicMock()
+    ha_binary_sensor_m.BinarySensorDeviceClass.PROBLEM = "problem"
 
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.CONF_NAME         = "name"
@@ -144,9 +166,10 @@ def sensor_ctx():
             setattr(pkg_se, attr, getattr(se, attr))
 
     new_modules = {
-        "homeassistant.components":         ha_comps,
-        "homeassistant.components.sensor":  ha_sensor_m,
-        "homeassistant.const":              ha_const,
+        "homeassistant.components":                 ha_comps,
+        "homeassistant.components.sensor":          ha_sensor_m,
+        "homeassistant.components.binary_sensor":   ha_binary_sensor_m,
+        "homeassistant.const":                      ha_const,
         "homeassistant.core":               ha_core,
         "homeassistant.helpers.event":      ha_event,
         "homeassistant.util":               ha_util,
