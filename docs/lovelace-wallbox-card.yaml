@@ -1,0 +1,54 @@
+# Wallbox Charging — Lovelace Card Configuration
+#
+# Sensors required:
+#   sensor.sdm_raw_surplus          (W, pre-hysteresis — Story 6-1 / Epic 6)
+#   sensor.sdm_reported_surplus     (W, post-hysteresis — Story 6-1 / Epic 6)
+#   sensor.sdm_wallbox_last_poll    (datetime — Story 7-1 / Epic 7)
+#   binary_sensor.sdm_wallbox_poll_warning (on/off — Story 7-2 / Epic 7)
+#
+# Warning threshold: 300 seconds (5 minutes) of Modbus poll silence.
+# To change the threshold:
+#   1. Edit WALLBOX_POLL_WARNING_THRESHOLD in sensor.py
+#   2. Restart Home Assistant
+#   (No changes to this YAML file required)
+#
+# Dependencies: none — uses only built-in HA card types (conditional, entities).
+# No HACS or custom card installation required.
+
+- type: conditional
+  # Normal state: wallbox is polling — no warning
+  conditions:
+    - condition: state
+      entity: binary_sensor.sdm_wallbox_poll_warning
+      state: "off"
+  card:
+    type: entities
+    title: Wallbox Charging
+    entities:
+      - entity: sensor.sdm_raw_surplus
+        name: Raw Surplus
+      - entity: sensor.sdm_reported_surplus
+        name: Reported Surplus
+      - entity: sensor.sdm_wallbox_last_poll
+        name: Last Wallbox Poll
+
+- type: conditional
+  # Warning state: no Modbus poll received for >300 s (5 minutes)
+  # The card title gains ⚠ to signal the issue at a glance.
+  # To suppress this warning, ensure the wallbox is polling the Modbus server.
+  conditions:
+    - condition: state
+      entity: binary_sensor.sdm_wallbox_poll_warning
+      state: "on"
+  card:
+    type: entities
+    title: "Wallbox Charging \u26A0"
+    entities:
+      - entity: sensor.sdm_raw_surplus
+        name: Raw Surplus
+      - entity: sensor.sdm_reported_surplus
+        name: Reported Surplus
+      - entity: sensor.sdm_wallbox_last_poll
+        name: Last Wallbox Poll
+        # WARNING: No Modbus poll received for >5 minutes.
+        # Check wallbox network connectivity and Modbus TCP port 5020.
