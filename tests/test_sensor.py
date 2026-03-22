@@ -629,7 +629,9 @@ class TestEvaluationTick:
     def test_async_write_ha_state_called(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
         se = mocks["se"]
-        s = _make_sensor(mod, MagicMock(), sample_config)
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
         asyncio.run(s.async_added_to_hass())
 
         s._engine = MagicMock()
@@ -1356,7 +1358,9 @@ class TestFailSafeEvaluationTick:
 
     def test_failsafe_calls_force_failsafe_on_hysteresis(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
-        s = _make_sensor(mod, MagicMock(), sample_config)
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
         asyncio.run(s.async_added_to_hass())
         mock_engine = MagicMock()
         s._engine = mock_engine
@@ -1369,7 +1373,9 @@ class TestFailSafeEvaluationTick:
     def test_failsafe_writes_zero_to_modbus(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
         mocks["input_data_block"].set_float.reset_mock()
-        s = _make_sensor(mod, MagicMock(), sample_config)
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
         asyncio.run(s.async_added_to_hass())
         s._engine = MagicMock()
         self._run_tick(s)
@@ -1379,7 +1385,9 @@ class TestFailSafeEvaluationTick:
 
     def test_failsafe_does_not_call_evaluate_cycle(self, sensor_ctx, sample_config):
         mod, mocks = sensor_ctx
-        s = _make_sensor(mod, MagicMock(), sample_config)
+        mock_hass = MagicMock()
+        mock_hass.states.get.return_value = None
+        s = _make_sensor(mod, mock_hass, sample_config)
         asyncio.run(s.async_added_to_hass())
         mock_engine = MagicMock()
         s._engine = mock_engine
