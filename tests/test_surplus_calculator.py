@@ -321,6 +321,69 @@ class TestEdgeCases:
 
 
 # ===========================================================================
+# Inverter output cap — max_inverter_output_kw
+# ===========================================================================
+
+CAP_CONFIG: dict = {
+    **FLOOR_50_CONFIG,
+    "max_inverter_output_kw": 10.0,
+}
+
+
+class TestInverterOutputCap:
+    """Surplus must never exceed max_inverter_output_kw."""
+
+    def test_surplus_capped_at_inverter_max(self, se):
+        """PV=15000, user=2000 → real=13 kW, capped to 10 kW."""
+        calc = se.SurplusCalculator(CAP_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=15000, user_w=2000, soc_pct=100)
+        )
+        assert result.reported_kw == pytest.approx(10.0)
+
+    def test_surplus_below_cap_unchanged(self, se):
+        """PV=8000, user=1200 → real=6.8 kW, below cap → unchanged."""
+        calc = se.SurplusCalculator(CAP_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=8000, user_w=1200, soc_pct=100)
+        )
+        assert result.reported_kw == pytest.approx(6.8)
+
+    def test_surplus_exactly_at_cap(self, se):
+        """PV=12000, user=2000 → real=10 kW == cap → unchanged."""
+        calc = se.SurplusCalculator(CAP_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=12000, user_w=2000, soc_pct=100)
+        )
+        assert result.reported_kw == pytest.approx(10.0)
+
+    def test_state_still_active_when_capped(self, se):
+        """Capping does not change charging state."""
+        calc = se.SurplusCalculator(CAP_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=15000, user_w=2000, soc_pct=100)
+        )
+        assert result.charging_state == "ACTIVE"
+
+    def test_default_cap_when_not_configured(self, se):
+        """Without explicit max_inverter_output_kw, default 10.0 applies."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=15000, user_w=2000, soc_pct=100)
+        )
+        assert result.reported_kw == pytest.approx(10.0)
+
+    def test_custom_cap_value(self, se):
+        """Custom max_inverter_output_kw=8.0 limits surplus to 8 kW."""
+        cfg = {**FLOOR_50_CONFIG, "max_inverter_output_kw": 8.0}
+        calc = se.SurplusCalculator(cfg)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=15000, user_w=2000, soc_pct=100)
+        )
+        assert result.reported_kw == pytest.approx(8.0)
+
+
+# ===========================================================================
 # Story 3.2 — Forecast-Driven SOC Target Adjustment
 # ===========================================================================
 
