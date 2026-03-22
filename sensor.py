@@ -16,7 +16,7 @@ from .modbus_server import (
     input_data_block,
 )
 from .sdm630_input_registers import TOTAL_POWER
-from . import CONF_ENTITIES
+from . import CONF_ENTITIES, DEFAULTS
 from .surplus_engine import (
     SurplusEngine,
     SensorSnapshot,
@@ -236,7 +236,29 @@ class SDM630SimSensor(SensorEntity):
             self._write_result(result)
             return
 
-        # Recovery: both staleness and validity checks passed
+        # Story 4.4: value range validation (runs only when unavailability/staleness checks pass)
+        range_fail = self._validate_cache()
+        if range_fail:
+            self._engine.hysteresis_filter.force_failsafe(range_fail)
+            if self._failsafe_reason_logged != range_fail:
+                _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", range_fail)
+                self._failsafe_reason_logged = range_fail
+            else:
+                _LOGGER.debug("SDM630 FAIL-SAFE (ongoing): %s", range_fail)
+            result = EvaluationResult(
+                reported_kw=0.0,
+                real_surplus_kw=0.0,
+                buffer_used_kw=0.0,
+                soc_percent=self._sensor_cache.get(CACHE_KEY_SOC, (0.0,))[0],
+                soc_floor_active=SOC_HARD_FLOOR,
+                charging_state="FAILSAFE",
+                reason=range_fail,
+                forecast_available=False,
+            )
+            self._write_result(result)
+            return
+
+        # Recovery: staleness, validity, and range checks all passed
         if self._failsafe_reason_logged is not None:
             self._engine.hysteresis_filter.resume()
             _LOGGER.info("SDM630 recovered from FAILSAFE. Resuming normal evaluation.")
@@ -279,6 +301,36 @@ class SDM630SimSensor(SensorEntity):
             _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", result.reason)
 
         self._write_result(result)
+
+    def _validate_cache(self) -> "str | None":
+        """Validate cache values are within plausible ranges (Story 4.4).
+
+        Returns a reason string if any valid cache entry is out of range,
+        or None if all checks pass. Skips entries already marked invalid
+        (valid=False) — Story 4.1 handles those independently (AC7).
+        """
+        ranges = self._config.get("sensor_ranges", DEFAULTS["sensor_ranges"])
+        checks = [
+            (CACHE_KEY_SOC,           "soc"),
+            (CACHE_KEY_POWER_TO_GRID, "power_w"),
+            (CACHE_KEY_PV_PRODUCTION, "power_w"),
+            (CACHE_KEY_POWER_TO_USER, "power_w"),
+        ]
+        for cache_key, range_key in checks:
+            entry = self._sensor_cache.get(cache_key)
+            if entry is None or not entry[2]:  # missing or valid=False: defer to Story 4.1
+                continue
+            rng = ranges.get(range_key)
+            if rng is None:
+                continue
+            min_val, max_val = rng
+            value = entry[0]
+            if not (min_val <= value <= max_val):
+                entity_id = self._cache_key_to_entity.get(cache_key, cache_key)
+                return (
+                    f"{entity_id}: value {value} out of range [{min_val}, {max_val}]"
+                )
+        return None
 
     def _check_cache_validity(self) -> tuple[bool, str]:
         """Return (is_valid, reason). FAILSAFE reason set if any required entry is missing or invalid."""

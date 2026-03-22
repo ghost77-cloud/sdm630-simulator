@@ -649,3 +649,95 @@ class TestForecastAdjustment:
             r.levelno >= logging.WARNING for r in caplog.records
         ), f"Unexpected WARNING records: {[r.message for r in caplog.records if r.levelno >= logging.WARNING]}"
 
+
+# ===========================================================================
+# Story 4.3 — Hard SOC Floor Enforcement
+# ===========================================================================
+
+class TestHardSocFloorEnforcement:
+    """AC1–AC4 for Story 4.3: SOC_HARD_FLOOR = 50% absolute protection."""
+
+    # ── AC3 — SOC below hard floor: FAILSAFE ─────────────────────────────────
+
+    def test_soc_below_hard_floor_returns_failsafe(self, se):
+        """AC3: SOC=48 < 50 → charging_state=FAILSAFE, reported_kw=0, no exception."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        result = calc.calculate_surplus(_snap(se, pv_w=8000, user_w=500, soc_pct=48))
+        assert result.charging_state == "FAILSAFE"
+        assert result.reported_kw == pytest.approx(0.0)
+        assert result.reason == "SOC below hard floor"
+        assert result.real_surplus_kw == pytest.approx(0.0)
+        assert result.buffer_used_kw == pytest.approx(0.0)
+        assert result.soc_floor_active == 50
+        assert result.forecast_available is False
+
+    def test_soc_far_below_hard_floor_returns_failsafe(self, se):
+        """AC3 edge: SOC=0 → FAILSAFE, no exception."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        result = calc.calculate_surplus(_snap(se, pv_w=8000, user_w=0, soc_pct=0))
+        assert result.charging_state == "FAILSAFE"
+        assert result.reported_kw == pytest.approx(0.0)
+
+    # ── AC2 — SOC exactly at hard floor: zero buffer ──────────────────────────
+
+    def test_soc_at_hard_floor_zero_buffer(self, se):
+        """AC2: SOC=50 == floor=50 → buffer_used_kw=0, reported_kw = real surplus."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        # PV=8000W, user=500W → real_surplus = 7.5 kW ≥ threshold → ACTIVE
+        result = calc.calculate_surplus(_snap(se, pv_w=8000, user_w=500, soc_pct=50))
+        assert result.buffer_used_kw == pytest.approx(0.0)
+        assert result.real_surplus_kw == pytest.approx(7.5)
+        assert result.reported_kw == pytest.approx(result.real_surplus_kw)
+        assert result.charging_state == "ACTIVE"
+
+    # ── AC1 — SOC near floor: buffer capped by headroom formula ──────────────
+
+    def test_soc_near_floor_buffer_capped(self, se):
+        """AC1: SOC=51, battery=10kWh, hold=10min → buffer_kw_max ≈ 0.6 kW caps the draw.
+
+        Proof: headroom=1%, buffer_energy=0.1 kWh, buffer_kw_max=min(10, 0.1/(10/60))=0.6 kW
+        Use threshold=2.9 so gap=0.6 exactly → buffer fills to cap → ACTIVE.
+        """
+        cfg = {
+            "wallbox_threshold_kw": 2.9,  # reachable: real_surplus(2.3)+buffer(0.6)=2.9
+            "max_discharge_kw": 10.0,
+            "battery_capacity_kwh": 10.0,
+            "hold_time_minutes": 10,
+            "time_strategy": [{"default": True, "soc_floor": 50}],
+        }
+        calc = se.SurplusCalculator(cfg)
+        # real_surplus = (2500 - 200) / 1000 = 2.3 kW; gap = 2.9 - 2.3 = 0.6 kW
+        # buffer_kw_max = min(10, 0.1/(10/60)) = 0.6 kW (headroom-limited)
+        # buffer_used = min(0.6, 0.6) = 0.6 kW; augmented = 2.9 → ACTIVE
+        result = calc.calculate_surplus(_snap(se, pv_w=2500, user_w=200, soc_pct=51))
+        assert result.charging_state == "ACTIVE"
+        assert result.buffer_used_kw == pytest.approx(0.6, abs=1e-6)
+        assert result.soc_floor_active == 50
+
+    # ── AC4 — Misconfigured soc_floor clamped with one-time warning ───────────
+
+    def test_misconfigured_floor_clamped_and_warned_once(self, se, caplog):
+        """AC4: time_strategy soc_floor=30 → clamped to 50, warning emitted once."""
+        import logging
+        cfg = {
+            "wallbox_threshold_kw": 4.2,
+            "max_discharge_kw": 10.0,
+            "battery_capacity_kwh": 10.0,
+            "hold_time_minutes": 10,
+            "time_strategy": [{"before": "23:59", "soc_floor": 30}],
+        }
+        calc = se.SurplusCalculator(cfg)
+        snap = _snap(se, pv_w=5000, user_w=500, soc_pct=70)
+        with caplog.at_level(logging.WARNING):
+            floor1 = calc.get_soc_floor(snap)
+            floor2 = calc.get_soc_floor(snap)
+        # Floor must be clamped to 50 in both calls
+        assert floor1 == 50
+        assert floor2 == 50
+        # Warning must be emitted exactly once (one-time guard)
+        clamp_warnings = [
+            r for r in caplog.records
+            if "Clamping" in r.message and r.levelno == logging.WARNING
+        ]
+        assert len(clamp_warnings) == 1
+

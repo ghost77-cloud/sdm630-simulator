@@ -1,6 +1,6 @@
 # Story 4.3: Hard SOC Floor Enforcement
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 
@@ -50,18 +50,18 @@ SOC_HARD_FLOOR 50%%. Clamping.", configured_value)` (emitted at most once per
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Confirm/add `SOC_HARD_FLOOR` constant in `surplus_engine.py` (AC: #1–#4)
-  - [ ] Add module-level `SOC_HARD_FLOOR: int = 50` near the top of
+- [x] Task 1: Confirm/add `SOC_HARD_FLOOR` constant in `surplus_engine.py` (AC: #1–#4)
+  - [x] Add module-level `SOC_HARD_FLOOR: int = 50` near the top of
         `surplus_engine.py`, below imports and above class definitions
-  - [ ] If a local copy already exists (e.g. read from `self.config["soc_hard_floor"]`),
+  - [x] If a local copy already exists (e.g. read from `self.config["soc_hard_floor"]`),
         keep both: the constant is the non-overridable absolute; the config value is
         the operator-configured floor (must be ≥ `SOC_HARD_FLOOR`)
-- [ ] Task 2: Add `_hard_floor_warned` guard flag to `SurplusCalculator.__init__`
+- [x] Task 2: Add `_hard_floor_warned` guard flag to `SurplusCalculator.__init__`
         (AC: #4)
-  - [ ] Add `self._hard_floor_warned: bool = False` to `__init__`
-  - [ ] This ensures the "clamping" warning fires once per instance, not every
+  - [x] Add `self._hard_floor_warned: bool = False` to `__init__`
+  - [x] This ensures the "clamping" warning fires once per instance, not every
         evaluation cycle
-- [ ] Task 3: Enforce hard floor at the top of `get_soc_floor(snapshot)` (AC: #4)
+- [x] Task 3: Enforce hard floor at the top of `get_soc_floor(snapshot)` (AC: #4)
   - [ ] After resolving the applicable time-window rule and its `soc_floor` value,
         before returning:
 
@@ -77,7 +77,7 @@ SOC_HARD_FLOOR 50%%. Clamping.", configured_value)` (emitted at most once per
         return effective_floor
         ```
 
-- [ ] Task 4: Add FAILSAFE guard in `calculate_surplus(snapshot)` for
+- [x] Task 4: Add FAILSAFE guard in `calculate_surplus(snapshot)` for
         `soc_percent < SOC_HARD_FLOOR` (AC: #3)
   - [ ] Insert as the **first check** in `calculate_surplus`, before any other
         computation:
@@ -100,25 +100,25 @@ SOC_HARD_FLOOR 50%%. Clamping.", configured_value)` (emitted at most once per
             )
         ```
 
-- [ ] Task 5: Verify AC2 (SOC = 50) is handled by existing headroom formula (AC: #2)
-  - [ ] When SOC = 50 and `soc_floor` = 50: `soc_headroom = max(0.0, 50 - 50) = 0.0`,
+- [x] Task 5: Verify AC2 (SOC = 50) is handled by existing headroom formula (AC: #2)
+  - [x] When SOC = 50 and `soc_floor` = 50: `soc_headroom = max(0.0, 50 - 50) = 0.0`,
         `buffer_energy_kwh = 0.0`, `buffer_kw_max = 0.0`, `buffer_used_kw = 0.0`
-  - [ ] This is correct by construction from Story 2.2 — no code change needed; add
+  - [x] This is correct by construction from Story 2.2 — no code change needed; add
         an inline comment confirming the invariant
-- [ ] Task 6: Verify AC1 (SOC = 51) existing headroom formula already caps correctly
+- [x] Task 6: Verify AC1 (SOC = 51) existing headroom formula already caps correctly
         (AC: #1)
-  - [ ] Numeric check: `soc_headroom = 1%`, `battery_capacity_kwh = 10.0` →
+  - [x] Numeric check: `soc_headroom = 1%`, `battery_capacity_kwh = 10.0` →
         `buffer_energy_kwh = 0.1 kWh`, `buffer_kw_max = min(10, 0.1/(10/60)) = 0.6 kW`
-  - [ ] With `real_surplus = 3.0 kW` and `threshold = 4.2 kW`, gap = 1.2 kW;
+  - [x] With `real_surplus = 3.0 kW` and `threshold = 4.2 kW`, gap = 1.2 kW;
         `buffer_used_kw = min(0.6, 1.2) = 0.6 kW` — not the full 1.2 kW; battery
         protected
-  - [ ] No code change needed; add inline comment confirming the hard-floor cap is
+  - [x] No code change needed; add inline comment confirming the hard-floor cap is
         implicit in the headroom formula
-- [ ] Task 7: Write unit-test cases for all ACs (AC: #1–#4)
-  - [ ] `test_soc_below_hard_floor_returns_failsafe` (AC3): SOC=48 → `charging_state="FAILSAFE"`, `reason="SOC below hard floor"`, `reported_kw=0.0`
-  - [ ] `test_soc_at_hard_floor_zero_buffer` (AC2): SOC=50, threshold=4.2, PV=8kW, load=0.5kW → `buffer_used_kw=0.0`, `reported_kw≈7.5`
-  - [ ] `test_soc_near_floor_buffer_capped` (AC1): SOC=51, `battery_capacity_kwh=10.0`, `hold_time_minutes=10` → `buffer_kw_max ≈ 0.6 kW`
-  - [ ] `test_misconfigured_floor_clamped_and_warned_once` (AC4): configure `time_strategy` with `soc_floor=30`, call `get_soc_floor()` twice → warning emitted once, returned floor = 50
+- [x] Task 7: Write unit-test cases for all ACs (AC: #1–#4)
+  - [x] `test_soc_below_hard_floor_returns_failsafe` (AC3): SOC=48 → `charging_state="FAILSAFE"`, `reason="SOC below hard floor"`, `reported_kw=0.0`
+  - [x] `test_soc_at_hard_floor_zero_buffer` (AC2): SOC=50, threshold=4.2, PV=8kW, load=0.5kW → `buffer_used_kw=0.0`, `reported_kw≈7.5`
+  - [x] `test_soc_near_floor_buffer_capped` (AC1): SOC=51, `battery_capacity_kwh=10.0`, `hold_time_minutes=10` → `buffer_kw_max ≈ 0.6 kW`; uses `wallbox_threshold_kw=2.9` to achieve ACTIVE state
+  - [x] `test_misconfigured_floor_clamped_and_warned_once` (AC4): configure `time_strategy` with `soc_floor=30`, call `get_soc_floor()` twice → warning emitted once, returned floor = 50
 
 ## Dev Notes
 
@@ -286,4 +286,17 @@ Claude Sonnet 4.6
 
 ### Completion Notes List
 
+- ✅ Task 1: `SOC_HARD_FLOOR: int = 50` already present from prior stories — confirmed, no addition needed.
+- ✅ Task 2: Added `self._hard_floor_warned: bool = False` to `SurplusCalculator.__init__`.
+- ✅ Task 3: Replaced silent `max()` clamp in `get_soc_floor()` "before" branch with explicit one-time `_LOGGER.warning` + `_hard_floor_warned` guard. Seasonal-target warning (separate path) left as-is from Story 2.1.
+- ✅ Task 4: Inserted FAILSAFE early-return as first check in `calculate_surplus()` — returns `EvaluationResult(charging_state="FAILSAFE", reason="SOC below hard floor", ...)` when `soc_percent < SOC_HARD_FLOOR`.
+- ✅ Tasks 5+6: Added inline comments in `calculate_surplus()` documenting AC2 (SOC=floor → headroom=0 → buffer=0 by construction) and AC1 (SOC=51 → headroom=1% → buffer_kw_max≈0.6 kW) invariants.
+- ✅ Task 7: Added `TestHardSocFloorEnforcement` class (5 tests) to `tests/test_surplus_calculator.py`. AC1 test uses `wallbox_threshold_kw=2.9` to achieve ACTIVE state with headroom-limited buffer.
+- 339 tests pass, 0 failures.
+- ✅ Code Review P1 fix: Unified one-time warning guard (`_hard_floor_warned`) now also covers the "default" branch in `get_soc_floor()`. Warning message unified to `"Configured soc_floor %d%% below SOC_HARD_FLOOR 50%%. Clamping."`. Updated `test_low_seasonal_target_clamped` in `tests/test_soc_floor.py` to match new message format.
+
 ### File List
+
+- `surplus_engine.py`
+- `tests/test_surplus_calculator.py`
+- `tests/test_soc_floor.py`

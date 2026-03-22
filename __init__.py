@@ -51,6 +51,7 @@ CONF_STALE_THRESHOLD_SECONDS = "stale_threshold_seconds"
 CONF_MAX_DISCHARGE_KW     = "max_discharge_kw"
 CONF_BATTERY_CAPACITY_KWH = "battery_capacity_kwh"
 CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"
+CONF_SENSOR_RANGES        = "sensor_ranges"   # optional; keys: soc, power_w
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DEFAULTS: dict = {
@@ -63,6 +64,12 @@ DEFAULTS: dict = {
     "max_discharge_kw": 10.0,
     "battery_capacity_kwh": 10.0,
     "solar_remaining_threshold_kwh": 2.0,
+    # sensor_ranges: plausible value bounds for cache validation (Story 4.4)
+    # Override in YAML with sensor_ranges: { soc: [0, 100], power_w: [-30000, 30000] }
+    "sensor_ranges": {
+        "soc": (0, 100),          # SOC % — always 0–100
+        "power_w": (-30000, 30000),  # W — bidirectional (grid export = negative)
+    },
     "seasonal_targets": {
         1: 100, 2: 90, 3: 80, 4: 70, 5: 70, 6: 70,
         7: 70,  8: 70, 9: 80, 10: 90, 11: 100, 12: 100,
@@ -98,6 +105,24 @@ SEASONAL_TARGETS_SCHEMA = vol.Schema(
     {vol.All(vol.Coerce(int), vol.Range(min=1, max=12)): vol.All(int, vol.Range(min=0, max=100))}
 )
 
+def _validate_range_order(pair):
+    """Reject inverted ranges where min > max."""
+    if pair[0] > pair[1]:
+        raise vol.Invalid(f"min must be \u2264 max, got {pair}")
+    return pair
+
+SENSOR_RANGE_PAIR = vol.All(
+    [vol.Coerce(float)],
+    vol.Length(min=2, max=2),
+    _validate_range_order,
+)
+SENSOR_RANGES_SCHEMA = vol.Schema(
+    {
+        vol.Optional("soc"):     SENSOR_RANGE_PAIR,
+        vol.Optional("power_w"): SENSOR_RANGE_PAIR,
+    }
+)
+
 COMPONENT_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_ENTITIES):              ENTITIES_SCHEMA,
@@ -112,6 +137,7 @@ COMPONENT_SCHEMA = vol.Schema(
         vol.Optional(CONF_MAX_DISCHARGE_KW):      vol.Coerce(float),
         vol.Optional(CONF_BATTERY_CAPACITY_KWH):  vol.Coerce(float),
         vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float),
+        vol.Optional(CONF_SENSOR_RANGES):          SENSOR_RANGES_SCHEMA,
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -147,6 +173,24 @@ async def async_setup(hass, config):
 
     # -- time_strategy: user list overrides default entirely --
     cfg[CONF_TIME_STRATEGY] = raw_cfg.get(CONF_TIME_STRATEGY, DEFAULTS["time_strategy"])
+
+    # -- sensor_ranges: optional; validate sub-keys present; fall back per missing key --
+    raw_ranges = raw_cfg.get(CONF_SENSOR_RANGES, {})
+    default_ranges = DEFAULTS["sensor_ranges"]
+    sensor_ranges: dict = {}
+    for sub_key in ("soc", "power_w"):
+        if sub_key in raw_ranges:
+            val = raw_ranges[sub_key]
+            sensor_ranges[sub_key] = tuple(val) if isinstance(val, list) else val
+        else:
+            if raw_ranges:  # user supplied partial sensor_ranges block
+                _LOGGER.warning(
+                    "sdm630_sim: sensor_ranges.%s missing \u2014 using default %s",
+                    sub_key,
+                    default_ranges[sub_key],
+                )
+            sensor_ranges[sub_key] = default_ranges[sub_key]
+    cfg[CONF_SENSOR_RANGES] = sensor_ranges
 
     # -- Entities: required / optional validation --
     entities_cfg: dict = raw_cfg.get(CONF_ENTITIES, {})

@@ -368,7 +368,7 @@ class TestAC9ClampedWithWarning:
             result = calc.get_soc_floor(snap)
         assert result == 50
         assert "SOC_HARD_FLOOR" in caplog.text
-        assert "month=6" in caplog.text
+        assert "Clamping" in caplog.text
 
     def test_boundary_seasonal_target_not_clamped(self, se, caplog):
         """seasonal_targets[6]=50 → exactly SOC_HARD_FLOOR → no clamping, no warning."""

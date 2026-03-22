@@ -77,6 +77,7 @@ class SurplusCalculator:
 
     def __init__(self, config: dict) -> None:
         self.config = config
+        self._hard_floor_warned: bool = False  # one-time warning guard (AC4 Story 4.3)
 
     def get_soc_floor(self, snapshot: SensorSnapshot) -> int:
         """Return current SOC floor based on time-window strategy. (Story 2.1)"""
@@ -96,16 +97,25 @@ class SurplusCalculator:
                 if boundary is None:
                     continue  # token unresolvable — skip, try next rule
                 if snapshot.timestamp < boundary:
-                    floor = max(int(rule["soc_floor"]), SOC_HARD_FLOOR)
+                    floor = int(rule["soc_floor"])
+                    if floor < SOC_HARD_FLOOR:
+                        if not self._hard_floor_warned:
+                            _LOGGER.warning(
+                                "Configured soc_floor %d%% below SOC_HARD_FLOOR 50%%. Clamping.",
+                                floor,
+                            )
+                            self._hard_floor_warned = True
+                        floor = SOC_HARD_FLOOR
                     return floor
             elif rule.get("default"):
                 floor = int(seasonal_targets.get(month, SOC_HARD_FLOOR))
                 if floor < SOC_HARD_FLOOR:
-                    _LOGGER.warning(
-                        "Configured seasonal_target month=%d value=%d below "
-                        "SOC_HARD_FLOOR. Clamping.",
-                        month, floor,
-                    )
+                    if not self._hard_floor_warned:
+                        _LOGGER.warning(
+                            "Configured soc_floor %d%% below SOC_HARD_FLOOR 50%%. Clamping.",
+                            floor,
+                        )
+                        self._hard_floor_warned = True
                     floor = SOC_HARD_FLOOR
                 return floor
 
@@ -200,6 +210,23 @@ class SurplusCalculator:
 
     def calculate_surplus(self, snapshot: SensorSnapshot) -> EvaluationResult:
         """Calculate net surplus adjusted for battery buffer. (Story 2.2)"""
+        # AC3 (Story 4.3): hard-floor FAILSAFE — must be first check, before any computation
+        if snapshot.soc_percent < SOC_HARD_FLOOR:
+            _LOGGER.warning(
+                "SDM630 FAIL-SAFE: SOC %.1f%% below hard floor %d%%. Reporting 0 kW.",
+                snapshot.soc_percent, SOC_HARD_FLOOR,
+            )
+            return EvaluationResult(
+                reported_kw=0.0,
+                real_surplus_kw=0.0,
+                buffer_used_kw=0.0,
+                soc_percent=snapshot.soc_percent,
+                soc_floor_active=SOC_HARD_FLOOR,
+                charging_state="FAILSAFE",
+                reason="SOC below hard floor",
+                forecast_available=False,
+            )
+
         base_floor = self.get_soc_floor(snapshot)
         soc_floor, forecast_tag = self._apply_forecast_adjustment(snapshot, base_floor)
 
@@ -210,6 +237,9 @@ class SurplusCalculator:
         hold_time_minutes    = max(self.config.get("hold_time_minutes", 10), 1)  # guard /0
         wallbox_threshold_kw = self.config.get("wallbox_threshold_kw", 4.2)
 
+        # AC2 invariant (Story 4.3): soc_percent == soc_floor → soc_headroom == 0 → buffer_used_kw == 0 (by construction)
+        # AC1 invariant (Story 4.3): soc_percent == 51, soc_floor == 50 → headroom 1% → buffer_energy_kwh == 0.1 kWh
+        #   → buffer_kw_max ≈ 0.6 kW (10-min hold) — hard floor protected implicitly by headroom formula
         soc_headroom      = max(0.0, snapshot.soc_percent - soc_floor)
         buffer_energy_kwh = soc_headroom * battery_capacity_kwh / 100.0
         buffer_kw_max     = min(max_discharge_kw,
