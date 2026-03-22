@@ -4,7 +4,7 @@ Implements all input and holding registers as per SDM630 documentation.
 """
 from pymodbus.server import StartSerialServer, StartTcpServer
 from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock, ModbusDeviceContext
-from pymodbus.device import ModbusDeviceIdentification
+from pymodbus import ModbusDeviceIdentification
 import struct
 import logging
 from typing import Callable
