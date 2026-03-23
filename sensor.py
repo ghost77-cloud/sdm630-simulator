@@ -349,8 +349,10 @@ class SDM630SimSensor(SensorEntity):
         Home Assistant may not fire state_changed events when an entity's
         value stays unchanged between integration polls.  This causes the
         cached timestamp to go stale even though the sensor is still alive.
-        Reading last_updated via hass.states.get() catches these cases.
+        If HA still reports the entity as available (not unavailable/unknown),
+        the sensor is considered alive and the staleness timer is reset to now.
         """
+        now = dt_util.utcnow()
         for entity_id, cache_key in self._entity_to_cache_key.items():
             entry = self._sensor_cache.get(cache_key)
             if entry is None:
@@ -359,8 +361,8 @@ class SDM630SimSensor(SensorEntity):
             if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
                 continue
             value, _cached_ts, is_valid = entry
-            if is_valid and state.last_updated is not None:
-                self._sensor_cache[cache_key] = (value, state.last_updated, is_valid)
+            if is_valid:
+                self._sensor_cache[cache_key] = (value, now, is_valid)
 
     def _check_staleness(self) -> str:
         """Check critical sensor cache entries for staleness (Story 4.2).
