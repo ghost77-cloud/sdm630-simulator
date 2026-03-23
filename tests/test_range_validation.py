@@ -191,6 +191,7 @@ def sensor_ctx():
         pkg_root = types.ModuleType(PKG)
         pkg_root.CONF_ENTITIES = "entities"
         pkg_root.DEFAULTS = init.DEFAULTS
+        pkg_root.DOMAIN = "sdm630_simulator"
         sys.modules[PKG] = pkg_root
         saved[PKG] = None
     else:
@@ -198,6 +199,8 @@ def sensor_ctx():
             sys.modules[PKG].CONF_ENTITIES = "entities"
         if not hasattr(sys.modules[PKG], "DEFAULTS"):
             sys.modules[PKG].DEFAULTS = init.DEFAULTS
+        if not hasattr(sys.modules[PKG], "DOMAIN"):
+            sys.modules[PKG].DOMAIN = "sdm630_simulator"
 
     sys.modules.pop(f"{PKG}.sensor", None)
     spec = importlib.util.spec_from_file_location(
@@ -241,7 +244,9 @@ def default_config():
 
 def _make_sensor(mod, cfg):
     """Instantiate SDM630SimSensor with mocked engine and maps."""
-    s = mod.SDM630SimSensor("Test Sensor", MagicMock(), cfg)
+    hass_mock = MagicMock()
+    hass_mock.states.get.return_value = None
+    s = mod.SDM630SimSensor("Test Sensor", hass_mock, cfg)
     s.async_on_remove      = MagicMock()
     s.async_write_ha_state = MagicMock()
     s._invalidation_reasons = {}

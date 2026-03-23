@@ -63,7 +63,7 @@ DEFAULTS: dict = {
     "wallbox_min_kw": 4.1,
     "hold_time_minutes": 10,
     "soc_hard_floor": 50,
-    "stale_threshold_seconds": 60,
+    "stale_threshold_seconds": 120,
     "max_discharge_kw": 10.0,
     "battery_capacity_kwh": 10.0,
     "max_inverter_output_kw": 10.0,

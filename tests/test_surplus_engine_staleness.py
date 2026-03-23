@@ -175,10 +175,21 @@ def sensor_ctx():
     if PKG not in sys.modules:
         pkg_root = types.ModuleType(PKG)
         pkg_root.CONF_ENTITIES = "entities"
+        pkg_root.DEFAULTS = {
+            "sensor_ranges": {"soc": (0, 100), "power_w": (-30000, 30000)},
+        }
+        pkg_root.DOMAIN = "sdm630_simulator"
         sys.modules[PKG] = pkg_root
         saved[PKG] = None
-    elif not hasattr(sys.modules[PKG], "CONF_ENTITIES"):
-        sys.modules[PKG].CONF_ENTITIES = "entities"
+    else:
+        if not hasattr(sys.modules[PKG], "CONF_ENTITIES"):
+            sys.modules[PKG].CONF_ENTITIES = "entities"
+        if not hasattr(sys.modules[PKG], "DEFAULTS"):
+            sys.modules[PKG].DEFAULTS = {
+                "sensor_ranges": {"soc": (0, 100), "power_w": (-30000, 30000)},
+            }
+        if not hasattr(sys.modules[PKG], "DOMAIN"):
+            sys.modules[PKG].DOMAIN = "sdm630_simulator"
 
     sys.modules.pop(f"{PKG}.sensor", None)
     spec = importlib.util.spec_from_file_location(
@@ -217,7 +228,9 @@ def sample_config():
 
 def _make_sensor(mod, cfg):
     """Instantiate SDM630SimSensor with mocked engine and helpers."""
-    s = mod.SDM630SimSensor("Test Sensor", MagicMock(), cfg)
+    hass_mock = MagicMock()
+    hass_mock.states.get.return_value = None
+    s = mod.SDM630SimSensor("Test Sensor", hass_mock, cfg)
     s.async_on_remove    = MagicMock()
     s.async_write_ha_state = MagicMock()
     s._invalidation_reasons = {}
@@ -603,3 +616,176 @@ class TestAC6SurplusCalculatorHAFree:
         assert calc_ha_imports == [], (
             f"SurplusCalculator must have zero HA imports; found: {calc_ha_imports}"
         )
+
+
+# ===========================================================================
+# AC7 — Timestamp refresh from HA state registry
+# ===========================================================================
+
+def _make_ha_state(value, last_updated):
+    """Create a mock HA state object with .state and .last_updated."""
+    st = MagicMock()
+    st.state = str(value)
+    st.last_updated = last_updated
+    return st
+
+
+class TestTimestampRefreshFromHAState:
+    """Verify _refresh_cache_timestamps prevents false staleness reports."""
+
+    def test_refresh_updates_stale_cache_timestamp(self, sensor_ctx, sample_config):
+        """Cached timestamp is old, but HA state.last_updated is fresh → refreshed."""
+        mod, mock_utcnow, _ = sensor_ctx
+        mock_utcnow.return_value = _NOW
+        s = _make_sensor(mod, sample_config)
+
+        stale_ts = _NOW - timedelta(seconds=120)
+        fresh_ts = _NOW - timedelta(seconds=10)
+        s._sensor_cache = {
+            "soc_percent":     (83.0, stale_ts, True),
+            "power_to_grid_w": (0.0,  _NOW,     True),
+            "pv_production_w": (5000.0, _NOW,   True),
+            "power_to_user_w": (500.0,  _NOW,   True),
+        }
+
+        # Mock HA state registry — SOC has fresh last_updated
+        s.hass.states.get = MagicMock(side_effect=lambda eid: {
+            "sensor.battery_soc":    _make_ha_state(83.0, fresh_ts),
+            "sensor.power_to_grid":  _make_ha_state(0.0, _NOW),
+            "sensor.pv_power":       _make_ha_state(5000.0, _NOW),
+            "sensor.power_to_user":  _make_ha_state(500.0, _NOW),
+        }.get(eid))
+
+        s._refresh_cache_timestamps()
+
+        # SOC timestamp should now be the fresh one from HA state
+        assert s._sensor_cache["soc_percent"][1] == fresh_ts
+
+    def test_refresh_prevents_false_staleness(self, sensor_ctx, sample_config):
+        """After refresh, a sensor that was falsely stale passes staleness check."""
+        mod, mock_utcnow, _ = sensor_ctx
+        mock_utcnow.return_value = _NOW
+        s = _make_sensor(mod, sample_config)
+
+        stale_ts = _NOW - timedelta(seconds=120)
+        fresh_ts = _NOW - timedelta(seconds=10)
+        s._sensor_cache = {
+            "soc_percent":     (83.0, stale_ts, True),
+            "power_to_grid_w": (0.0,  _NOW,     True),
+            "pv_production_w": (5000.0, _NOW,   True),
+            "power_to_user_w": (500.0,  _NOW,   True),
+        }
+
+        # Before refresh: staleness detected
+        result_before = s._check_staleness()
+        assert result_before  # stale
+
+        # Mock HA state registry with fresh timestamps
+        s._engine.hysteresis_filter.force_failsafe.reset_mock()
+        s.hass.states.get = MagicMock(side_effect=lambda eid: {
+            "sensor.battery_soc":    _make_ha_state(83.0, fresh_ts),
+            "sensor.power_to_grid":  _make_ha_state(0.0, _NOW),
+            "sensor.pv_power":       _make_ha_state(5000.0, _NOW),
+            "sensor.power_to_user":  _make_ha_state(500.0, _NOW),
+        }.get(eid))
+
+        s._refresh_cache_timestamps()
+        result_after = s._check_staleness()
+        assert not result_after  # no longer stale
+
+    def test_refresh_skips_unavailable_entities(self, sensor_ctx, sample_config):
+        """Unavailable HA state does not overwrite cache timestamp."""
+        mod, mock_utcnow, _ = sensor_ctx
+        mock_utcnow.return_value = _NOW
+        s = _make_sensor(mod, sample_config)
+
+        original_ts = _NOW - timedelta(seconds=30)
+        s._sensor_cache = {
+            "soc_percent":     (83.0, original_ts, True),
+            "power_to_grid_w": (0.0,  _NOW,        True),
+            "pv_production_w": (5000.0, _NOW,      True),
+            "power_to_user_w": (500.0,  _NOW,      True),
+        }
+
+        unavail_state = MagicMock()
+        unavail_state.state = "unavailable"
+        unavail_state.last_updated = _NOW
+
+        s.hass.states.get = MagicMock(side_effect=lambda eid: {
+            "sensor.battery_soc":    unavail_state,
+            "sensor.power_to_grid":  _make_ha_state(0.0, _NOW),
+            "sensor.pv_power":       _make_ha_state(5000.0, _NOW),
+            "sensor.power_to_user":  _make_ha_state(500.0, _NOW),
+        }.get(eid))
+
+        s._refresh_cache_timestamps()
+
+        # SOC timestamp should remain unchanged (unavailable → skipped)
+        assert s._sensor_cache["soc_percent"][1] == original_ts
+
+    def test_refresh_skips_invalid_cache_entries(self, sensor_ctx, sample_config):
+        """Cache entries marked invalid (is_valid=False) are not refreshed."""
+        mod, mock_utcnow, _ = sensor_ctx
+        mock_utcnow.return_value = _NOW
+        s = _make_sensor(mod, sample_config)
+
+        original_ts = _NOW - timedelta(seconds=30)
+        s._sensor_cache = {
+            "soc_percent":     (83.0, original_ts, False),  # invalid
+            "power_to_grid_w": (0.0,  _NOW,        True),
+            "pv_production_w": (5000.0, _NOW,      True),
+            "power_to_user_w": (500.0,  _NOW,      True),
+        }
+
+        s.hass.states.get = MagicMock(side_effect=lambda eid: {
+            "sensor.battery_soc":    _make_ha_state(83.0, _NOW),
+            "sensor.power_to_grid":  _make_ha_state(0.0, _NOW),
+            "sensor.pv_power":       _make_ha_state(5000.0, _NOW),
+            "sensor.power_to_user":  _make_ha_state(500.0, _NOW),
+        }.get(eid))
+
+        s._refresh_cache_timestamps()
+
+        # SOC timestamp should remain unchanged (is_valid=False → skipped)
+        assert s._sensor_cache["soc_percent"][1] == original_ts
+
+    def test_refresh_handles_all_entities(self, sensor_ctx, sample_config):
+        """All tracked entities get their timestamps refreshed, not just critical ones."""
+        mod, mock_utcnow, _ = sensor_ctx
+        mock_utcnow.return_value = _NOW
+        s = _make_sensor(mod, sample_config)
+
+        stale_ts = _NOW - timedelta(seconds=120)
+        fresh_ts = _NOW - timedelta(seconds=5)
+        s._sensor_cache = {
+            "soc_percent":     (83.0, stale_ts, True),
+            "power_to_grid_w": (0.0,  stale_ts, True),  # also stale
+            "pv_production_w": (5000.0, stale_ts, True),
+            "power_to_user_w": (500.0,  stale_ts, True),
+        }
+
+        s.hass.states.get = MagicMock(side_effect=lambda eid: {
+            "sensor.battery_soc":    _make_ha_state(83.0, fresh_ts),
+            "sensor.power_to_grid":  _make_ha_state(0.0, fresh_ts),
+            "sensor.pv_power":       _make_ha_state(5000.0, fresh_ts),
+            "sensor.power_to_user":  _make_ha_state(500.0, fresh_ts),
+        }.get(eid))
+
+        s._refresh_cache_timestamps()
+
+        for key in ("soc_percent", "power_to_grid_w", "pv_production_w", "power_to_user_w"):
+            assert s._sensor_cache[key][1] == fresh_ts, f"{key} timestamp not refreshed"
+
+    def test_refresh_skips_missing_cache_entries(self, sensor_ctx, sample_config):
+        """Entities not yet in cache (startup) are gracefully skipped."""
+        mod, mock_utcnow, _ = sensor_ctx
+        mock_utcnow.return_value = _NOW
+        s = _make_sensor(mod, sample_config)
+        s._sensor_cache = {}  # empty cache at startup
+
+        s.hass.states.get = MagicMock(side_effect=lambda eid:
+            _make_ha_state(0.0, _NOW))
+
+        # Should not raise
+        s._refresh_cache_timestamps()
+        assert s._sensor_cache == {}
