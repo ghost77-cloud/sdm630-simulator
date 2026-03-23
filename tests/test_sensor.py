@@ -183,14 +183,24 @@ def sensor_ctx():
     for k, v in new_modules.items():
         sys.modules[k] = v
 
-    # Ensure sdm630_simulator package exposes CONF_ENTITIES
     if PKG not in sys.modules:
         pkg_root = types.ModuleType(PKG)
         pkg_root.CONF_ENTITIES = "entities"
+        pkg_root.DEFAULTS = {
+            "sensor_ranges": {"soc": (0, 100), "power_w": (-30000, 30000)},
+        }
+        pkg_root.DOMAIN = "sdm630_simulator"
         sys.modules[PKG] = pkg_root
         saved[PKG] = None
-    elif not hasattr(sys.modules[PKG], "CONF_ENTITIES"):
-        sys.modules[PKG].CONF_ENTITIES = "entities"
+    else:
+        if not hasattr(sys.modules[PKG], "CONF_ENTITIES"):
+            sys.modules[PKG].CONF_ENTITIES = "entities"
+        if not hasattr(sys.modules[PKG], "DEFAULTS"):
+            sys.modules[PKG].DEFAULTS = {
+                "sensor_ranges": {"soc": (0, 100), "power_w": (-30000, 30000)},
+            }
+        if not hasattr(sys.modules[PKG], "DOMAIN"):
+            sys.modules[PKG].DOMAIN = "sdm630_simulator"
 
     # Load sensor.py fresh
     sys.modules.pop(f"{PKG}.sensor", None)
@@ -255,6 +265,10 @@ def _make_sensor(mod, hass, cfg):
     }
     s._cache_key_to_entity = {v: k for k, v in s._entity_to_cache_key.items()}
     s._invalidation_reasons = {}
+    # Default: hass.states.get returns None (entities not registered in tests)
+    # so that _refresh_cache_timestamps gracefully skips all entities.
+    if isinstance(hass.states.get, MagicMock):
+        hass.states.get.return_value = None
     return s
 
 
@@ -667,10 +681,12 @@ class TestSunSolarBoundaryTimes:
         se = mocks["se"]
 
         mock_hass = MagicMock()
-        mock_hass.states.get.return_value = self._make_sun_state()
+        sun_state = self._make_sun_state()
 
         s = _make_sensor(mod, mock_hass, sample_config)
         asyncio.run(s.async_added_to_hass())
+        # side_effect: return sun state for "sun.sun", None for tracked entities
+        mock_hass.states.get.side_effect = lambda eid: sun_state if eid == "sun.sun" else None
 
         captured = {}
 
@@ -763,10 +779,11 @@ class TestSunSolarBoundaryTimes:
         sun_state = MagicMock()
         sun_state.state = "above_horizon"
         sun_state.attributes = {"next_setting": "2026-06-15T20:00:00+00:00"}
-        mock_hass.states.get.return_value = sun_state
 
         s = _make_sensor(mod, mock_hass, sample_config)
         asyncio.run(s.async_added_to_hass())
+        # side_effect: return sun state for "sun.sun", None for tracked entities
+        mock_hass.states.get.side_effect = lambda eid: sun_state if eid == "sun.sun" else None
 
         captured = {}
 

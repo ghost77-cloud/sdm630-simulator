@@ -36,7 +36,7 @@ class TestDefaults:
         assert comp.DEFAULTS["soc_hard_floor"] == 50
 
     def test_defaults_stale_threshold_seconds(self, comp):
-        assert comp.DEFAULTS["stale_threshold_seconds"] == 60
+        assert comp.DEFAULTS["stale_threshold_seconds"] == 120
 
     def test_defaults_max_discharge_kw(self, comp):
         assert comp.DEFAULTS["max_discharge_kw"] == 10.0
