@@ -24,6 +24,7 @@ CACHE_KEY_SOC               = "soc_percent"
 CACHE_KEY_POWER_TO_GRID     = "power_to_grid_w"
 CACHE_KEY_PV_PRODUCTION     = "pv_production_w"
 CACHE_KEY_POWER_TO_USER     = "power_to_user_w"
+CACHE_KEY_POWER_FROM_GRID   = "power_from_grid_w"
 CACHE_KEY_BATTERY_DISCHARGE = "battery_discharge_w"
 
 
@@ -51,6 +52,7 @@ class SensorSnapshot:
     timestamp: datetime
     sunset_time: datetime | None
     sunrise_time: datetime | None
+    power_from_grid_w: float = 0.0
     forecast: ForecastData | None = None
 
 
@@ -230,7 +232,11 @@ class SurplusCalculator:
         base_floor = self.get_soc_floor(snapshot)
         soc_floor, forecast_tag = self._apply_forecast_adjustment(snapshot, base_floor)
 
-        real_surplus_kw = (snapshot.pv_production_w - snapshot.power_to_user_w) / 1000.0
+        real_surplus_kw = (
+            snapshot.pv_production_w
+            - snapshot.power_to_user_w
+            - snapshot.power_from_grid_w
+        ) / 1000.0
 
         battery_capacity_kwh = self.config.get("battery_capacity_kwh", 10.0)
         max_discharge_kw     = self.config.get("max_discharge_kw", 10.0)
@@ -292,9 +298,10 @@ class SurplusCalculator:
             reason = f"wallbox_included_in_load|{forecast_tag}"
             _LOGGER.debug(
                 "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
-                "state=%s reported=%.2fkW reason=%s forecast=%s",
+                "state=%s reported=%.2fkW grid_import=%.2fkW reason=%s forecast=%s",
                 real_surplus_kw, buffer_used_kw, snapshot.soc_percent,
                 soc_floor, "ACTIVE", augmented_kw,
+                snapshot.power_from_grid_w / 1000.0,
                 reason, forecast_available,
             )
             return EvaluationResult(
@@ -311,9 +318,10 @@ class SurplusCalculator:
         reason = f"surplus_below_threshold|{forecast_tag}"
         _LOGGER.debug(
             "SDM630 Eval: surplus=%.2fkW buffer=%.2fkW SOC=%d%% floor=%d%% "
-            "state=%s reported=%.2fkW reason=%s forecast=%s",
+            "state=%s reported=%.2fkW grid_import=%.2fkW reason=%s forecast=%s",
             real_surplus_kw, 0.0, snapshot.soc_percent,
             soc_floor, "INACTIVE", 0.0,
+            snapshot.power_from_grid_w / 1000.0,
             reason, forecast_available,
         )
         return EvaluationResult(

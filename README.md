@@ -61,7 +61,8 @@ sdm630_simulator:
     power_to_grid: sensor.growatt_export_power   # Netzeinspeisung (W)
     pv_production: sensor.growatt_pv_power       # PV-Erzeugung (W)
     power_to_user: sensor.growatt_home_consumption  # Hausverbrauch (W)
-    # -- Optionale Entitäten (für Forecast) --
+    # -- Optionale Entitäten (für Forecast/Grid-Import) --
+    power_from_grid: sensor.sph10000_ac_to_user_total  # AC Netzbezug (W) — optional, default 0
     weather: weather.home                        # Wetter-Service
     forecast_solar: sensor.forecast_solar_kwh    # Solar-Forecast
     sunset: sensor.sun_next_setting              # Nächster Sonnenuntergang

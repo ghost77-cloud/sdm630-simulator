@@ -37,6 +37,7 @@ CONF_SOC                  = "soc"              # required
 CONF_POWER_TO_GRID        = "power_to_grid"    # required
 CONF_PV_PRODUCTION        = "pv_production"    # required
 CONF_POWER_TO_USER        = "power_to_user"    # required
+CONF_POWER_FROM_GRID      = "power_from_grid"  # optional
 CONF_WEATHER              = "weather"          # optional
 CONF_FORECAST_SOLAR       = "forecast_solar"   # optional
 CONF_SUNSET               = "sunset"           # optional — overrides sun.sun for next_setting
@@ -94,6 +95,7 @@ ENTITIES_SCHEMA = vol.Schema(
         vol.Required(CONF_POWER_TO_GRID): cv.entity_id,
         vol.Required(CONF_PV_PRODUCTION): cv.entity_id,
         vol.Required(CONF_POWER_TO_USER): cv.entity_id,
+        vol.Optional(CONF_POWER_FROM_GRID): cv.entity_id,
         vol.Optional(CONF_WEATHER):       cv.entity_id,
         vol.Optional(CONF_FORECAST_SOLAR): cv.entity_id,
         vol.Optional(CONF_SUNSET):         cv.entity_id,
@@ -213,7 +215,7 @@ async def async_setup(hass, config):
     else:
         cfg["failsafe"] = False
 
-    for optional_key in (CONF_WEATHER, CONF_FORECAST_SOLAR):
+    for optional_key in (CONF_WEATHER, CONF_FORECAST_SOLAR, CONF_POWER_FROM_GRID):
         if optional_key not in entities_cfg:
             _LOGGER.warning(
                 "%s: optional entity '%s' not configured — degraded mode",

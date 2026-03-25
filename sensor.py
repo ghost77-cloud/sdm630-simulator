@@ -33,6 +33,7 @@ from .surplus_engine import (
     CACHE_KEY_POWER_TO_GRID,
     CACHE_KEY_PV_PRODUCTION,
     CACHE_KEY_POWER_TO_USER,
+    CACHE_KEY_POWER_FROM_GRID,
     SOC_HARD_FLOOR,
 )
 
@@ -44,10 +45,11 @@ SCAN_INTERVAL = timedelta(seconds=10)
 # Maps entity role keys (from config['entities']) to sensor cache keys.
 # Only numeric state subscriptions are listed here (sun/weather are excluded).
 ENTITY_ROLE_TO_CACHE_KEY = {
-    "soc":           CACHE_KEY_SOC,
-    "power_to_grid": CACHE_KEY_POWER_TO_GRID,
-    "pv_production": CACHE_KEY_PV_PRODUCTION,
-    "power_to_user": CACHE_KEY_POWER_TO_USER,
+    "soc":             CACHE_KEY_SOC,
+    "power_to_grid":   CACHE_KEY_POWER_TO_GRID,
+    "pv_production":   CACHE_KEY_PV_PRODUCTION,
+    "power_to_user":   CACHE_KEY_POWER_TO_USER,
+    "power_from_grid": CACHE_KEY_POWER_FROM_GRID,
 }
 
 WALLBOX_POLL_WARNING_THRESHOLD: int = 300  # seconds
@@ -514,13 +516,14 @@ class SDM630SimSensor(SensorEntity):
                 _LOGGER.debug("sunset entity %s unavailable — keeping sun.sun value", sunset_entity)
 
         snapshot = SensorSnapshot(
-            soc_percent     = self._sensor_cache.get(CACHE_KEY_SOC, (0.0, None, False))[0],
-            power_to_grid_w = self._sensor_cache.get(CACHE_KEY_POWER_TO_GRID, (0.0, None, False))[0],
-            pv_production_w = self._sensor_cache.get(CACHE_KEY_PV_PRODUCTION, (0.0, None, False))[0],
-            power_to_user_w = self._sensor_cache.get(CACHE_KEY_POWER_TO_USER, (0.0, None, False))[0],
-            timestamp       = now,
-            sunset_time     = sunset_time,
-            sunrise_time    = sunrise_time,
+            soc_percent       = self._sensor_cache.get(CACHE_KEY_SOC, (0.0, None, False))[0],
+            power_to_grid_w   = self._sensor_cache.get(CACHE_KEY_POWER_TO_GRID, (0.0, None, False))[0],
+            pv_production_w   = self._sensor_cache.get(CACHE_KEY_PV_PRODUCTION, (0.0, None, False))[0],
+            power_to_user_w   = self._sensor_cache.get(CACHE_KEY_POWER_TO_USER, (0.0, None, False))[0],
+            power_from_grid_w = self._sensor_cache.get(CACHE_KEY_POWER_FROM_GRID, (0.0, None, False))[0],
+            timestamp         = now,
+            sunset_time       = sunset_time,
+            sunrise_time      = sunrise_time,
         )
 
         result = await self._engine.evaluate_cycle(snapshot, hass=self.hass)

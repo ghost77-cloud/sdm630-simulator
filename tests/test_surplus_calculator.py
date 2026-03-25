@@ -67,12 +67,13 @@ FLOOR_50_CONFIG: dict = {
 }
 
 
-def _snap(se, *, pv_w, user_w, soc_pct, forecast=None):
+def _snap(se, *, pv_w, user_w, soc_pct, power_from_grid_w=0.0, forecast=None):
     return se.SensorSnapshot(
         soc_percent=soc_pct,
         power_to_grid_w=0.0,
         pv_production_w=pv_w,
         power_to_user_w=user_w,
+        power_from_grid_w=power_from_grid_w,
         timestamp=NOW,
         sunset_time=None,
         sunrise_time=None,
@@ -1079,4 +1080,43 @@ class TestSunsetCutoff:
         snap = self._snap_with_sunset(se, minutes_to_sunset=42)
         result = calc.calculate_surplus(snap)
         assert "42" in result.reason
+
+
+# ===========================================================================
+# AC1–AC3 — Grid import as negative surplus contribution (Story 4.5)
+# ===========================================================================
+
+class TestAC_GridImport:
+    """AC1: zero import → unchanged; AC2: import reduces surplus; AC3: import forces INACTIVE."""
+
+    def test_grid_import_zero_unchanged(self, se):
+        """AC1 — power_from_grid_w=0.0 must not alter existing behaviour."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=5000, user_w=1000, soc_pct=90, power_from_grid_w=0.0)
+        )
+        assert result.real_surplus_kw == pytest.approx(4.0)
+        assert result.charging_state == "ACTIVE"
+
+    def test_grid_import_reduces_surplus(self, se):
+        """AC2 — 500 W grid import reduces real_surplus by 0.5 kW."""
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=5000, user_w=1000, soc_pct=90, power_from_grid_w=500)
+        )
+        assert result.real_surplus_kw == pytest.approx(3.5)
+
+    def test_grid_import_forces_inactive(self, se):
+        """AC3 — grid import larger than PV-load margin → INACTIVE, not FAILSAFE.
+
+        SOC at floor (50%) so buffer_kw_max=0 — augmented_kw equals real_surplus.
+        pv=1000, user=800, grid=400 → real_surplus = (1000-800-400)/1000 = -0.2 kW
+        """
+        calc = se.SurplusCalculator(FLOOR_50_CONFIG)
+        result = calc.calculate_surplus(
+            _snap(se, pv_w=1000, user_w=800, soc_pct=50, power_from_grid_w=400)
+        )
+        assert result.real_surplus_kw == pytest.approx(-0.2)
+        assert result.charging_state == "INACTIVE"
+        assert result.charging_state != "FAILSAFE"
 
