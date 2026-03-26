@@ -113,14 +113,14 @@ class SDM630RawSurplusSensor(RestoreSensor):
     def __init__(self) -> None:
         self._attr_name = "SDM Raw Surplus"
         self._attr_unique_id = "sdm_raw_surplus"
-        self._attr_native_value: float | None = None
+        self._attr_native_value = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         last_data = await self.async_get_last_sensor_data()
         if last_data and last_data.native_value is not None:
             try:
-                self._attr_native_value = float(last_data.native_value)
+                self._attr_native_value = float(last_data.native_value)  # type: ignore[arg-type]
             except (ValueError, TypeError):
                 _LOGGER.warning("Could not restore raw surplus value: %r",
                                 last_data.native_value)
@@ -142,14 +142,14 @@ class SDM630ReportedSurplusSensor(RestoreSensor):
     def __init__(self) -> None:
         self._attr_name = "SDM Reported Surplus"
         self._attr_unique_id = "sdm_reported_surplus"
-        self._attr_native_value: float | None = None
+        self._attr_native_value = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         last_data = await self.async_get_last_sensor_data()
         if last_data and last_data.native_value is not None:
             try:
-                self._attr_native_value = float(last_data.native_value)
+                self._attr_native_value = float(last_data.native_value)  # type: ignore[arg-type]
             except (ValueError, TypeError):
                 _LOGGER.warning("Could not restore reported surplus value: %r",
                                 last_data.native_value)
@@ -254,7 +254,7 @@ class SDM630SimSensor(SensorEntity):
         self._attr_should_poll = False
         self.hass = hass
         self._config = config
-        self._sensor_cache: dict[str, tuple[float, object, bool]] = {}
+        self._sensor_cache: dict[str, tuple[float, datetime | None, bool]] = {}
         self._engine: SurplusEngine | None = None
         self._first_tick: bool = True
         self._entity_to_cache_key: dict[str, str] = {}
@@ -375,6 +375,8 @@ class SDM630SimSensor(SensorEntity):
         Sensors absent from _cache_key_to_entity or with None timestamps are
         silently skipped (startup grace — AC4, AC5).
         """
+        engine = self._engine
+        assert engine is not None
         threshold: int = self._config.get("stale_threshold_seconds", 60)
         now = dt_util.utcnow()
         critical_keys = (CACHE_KEY_SOC, CACHE_KEY_PV_PRODUCTION, CACHE_KEY_POWER_TO_USER)
@@ -400,13 +402,15 @@ class SDM630SimSensor(SensorEntity):
                     entity_id,
                     int(elapsed),
                 )
-                self._engine.hysteresis_filter.force_failsafe(reason)
+                engine.hysteresis_filter.force_failsafe(reason)
                 return reason
 
         return ""
 
     async def _evaluation_tick(self, now) -> None:
         """Called by async_track_time_interval at each evaluation cycle."""
+        engine = self._engine
+        assert engine is not None
         if self._first_tick:
             entities = self._config.get(CONF_ENTITIES, {})
             _LOGGER.info(
@@ -430,7 +434,7 @@ class SDM630SimSensor(SensorEntity):
         else:
             cache_valid, validity_reason = self._check_cache_validity()
             if not cache_valid:
-                self._engine.hysteresis_filter.force_failsafe(validity_reason)
+                engine.hysteresis_filter.force_failsafe(validity_reason)
                 failsafe_reason = validity_reason
             else:
                 failsafe_reason = ""
@@ -464,7 +468,7 @@ class SDM630SimSensor(SensorEntity):
         # Story 4.4: value range validation (runs only when unavailability/staleness checks pass)
         range_fail = self._validate_cache()
         if range_fail:
-            self._engine.hysteresis_filter.force_failsafe(range_fail)
+            engine.hysteresis_filter.force_failsafe(range_fail)
             if self._failsafe_reason_logged != range_fail:
                 _LOGGER.warning("SDM630 FAIL-SAFE: %s. Reporting 0 kW.", range_fail)
                 self._failsafe_reason_logged = range_fail
@@ -485,7 +489,7 @@ class SDM630SimSensor(SensorEntity):
 
         # Recovery: staleness, validity, and range checks all passed
         if self._failsafe_reason_logged is not None:
-            self._engine.hysteresis_filter.resume()
+            engine.hysteresis_filter.resume()
             _LOGGER.info("SDM630 recovered from FAILSAFE. Resuming normal evaluation.")
             self._failsafe_reason_logged = None
 
@@ -526,7 +530,7 @@ class SDM630SimSensor(SensorEntity):
             sunrise_time      = sunrise_time,
         )
 
-        result = await self._engine.evaluate_cycle(snapshot, hass=self.hass)
+        result = await engine.evaluate_cycle(snapshot, hass=self.hass)
 
         # Story 1.4: structured decision log
         _LOGGER.debug(
@@ -612,22 +616,4 @@ class SDM630SimSensor(SensorEntity):
             result.reported_kw * 1000,
         )
 
-    @property
-    def name(self):
-        """Return the name of the sensor."""
-        return self._attr_name
 
-    @property
-    def native_value(self):
-        """Return the state of the sensor."""
-        return self._attr_native_value
-
-    @property
-    def native_unit_of_measurement(self):
-        """Return the unit of measurement."""
-        return self._attr_native_unit_of_measurement
-
-    @property
-    def unique_id(self):
-        """Return a unique ID to use for this entity."""
-        return self._attr_unique_id
