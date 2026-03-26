@@ -67,7 +67,7 @@ async def start_modbus_server():
             stopbits=1,
             bytesize=8,
             parity="E",
-            baudrate="9600",
+            baudrate=9600,
             handle_local_echo=True,
         )
     except Exception as e:
