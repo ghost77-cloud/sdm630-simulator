@@ -1,0 +1,309 @@
+number.sph10000_output_power_limit
+SPH10000 Output Power Limit
+100
+min: 0
+max: 100
+step: 1
+mode: auto
+unit_of_measurement: %
+device_class: power_factor
+icon: mdi:transmission-tower-export
+friendly_name: SPH10000 Output Power Limit
+sensor.sph10000_ac_charge_enabled
+SPH10000 AC Charge Enabled
+0
+friendly_name: SPH10000 AC Charge Enabled
+sensor.sph10000_ac_frequency
+SPH10000 AC frequency
+50.06
+unit_of_measurement: Hz
+friendly_name: SPH10000 AC frequency
+sensor.sph10000_ac_to_grid_total
+SPH10000 AC to grid total
+4500.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 AC to grid total
+sensor.sph10000_ac_to_user_total
+SPH10000 AC to user total
+0.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 AC to user total
+sensor.sph10000_battery_charged_today
+Batterie Ladung heute
+6.3
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: Batterie Ladung heute
+sensor.sph10000_battery_charged_total
+SPH10000 Battery Charged (Total)
+2217.0
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Battery Charged (Total)
+sensor.sph10000_battery_discharged_today
+SPH10000 Battery Discharged (Today)
+1.8
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Battery Discharged (Today)
+sensor.sph10000_battery_discharged_total
+SPH10000 Battery Discharged (Total)
+2008.3
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Battery Discharged (Total)
+sensor.sph10000_charge_power
+SPH10000 Charge Power
+0.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Charge Power
+sensor.sph10000_discharge_power
+SPH10000 Discharge Power
+0.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Discharge Power
+sensor.sph10000_energy_produced_today
+SPH10000 Energy produced today
+36.5
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Energy produced today
+sensor.sph10000_energy_to_grid_today
+SPH10000 Energy To Grid (Today)
+30.2
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Energy To Grid (Today)
+sensor.sph10000_energy_to_grid_total
+SPH10000 Energy To Grid (Total)
+8673.7
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Energy To Grid (Total)
+sensor.sph10000_energy_to_user_today
+SPH10000 Energy To User (Today)
+0.1
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Energy To User (Today)
+sensor.sph10000_energy_to_user_total
+SPH10000 Energy To User (Total)
+1659.6
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Energy To User (Total)
+sensor.sph10000_input_1_amperage
+SPH10000 Input 1 Amperage
+3.3
+unit_of_measurement: A
+device_class: current
+friendly_name: SPH10000 Input 1 Amperage
+sensor.sph10000_input_1_energy_today
+SPH10000 Input 1 energy today
+20.3
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Input 1 energy today
+sensor.sph10000_input_1_total_energy
+SPH10000 Input 1 total energy
+6871.2
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Input 1 total energy
+sensor.sph10000_input_1_voltage
+SPH10000 Input 1 voltage
+700.6
+unit_of_measurement: V
+device_class: voltage
+friendly_name: SPH10000 Input 1 voltage
+sensor.sph10000_input_1_wattage
+SPH10000 Input 1 Wattage
+2380.8
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Input 1 Wattage
+sensor.sph10000_input_2_amperage
+SPH10000 Input 2 Amperage
+3.2
+unit_of_measurement: A
+device_class: current
+friendly_name: SPH10000 Input 2 Amperage
+sensor.sph10000_input_2_energy_today
+SPH10000 Input 2 energy today
+23.1
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Input 2 energy today
+sensor.sph10000_input_2_total_energy
+SPH10000 Input 2 total energy
+7120.6
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Input 2 total energy
+sensor.sph10000_input_2_voltage
+SPH10000 Input 2 voltage
+767.8
+unit_of_measurement: V
+device_class: voltage
+friendly_name: SPH10000 Input 2 voltage
+sensor.sph10000_input_2_wattage
+SPH10000 Input 2 Wattage
+2538.6
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Input 2 Wattage
+sensor.sph10000_intelligent_power_management_temperature
+SPH10000 Intelligent Power Management temperature
+38.3
+unit_of_measurement: °C
+device_class: temperature
+friendly_name: SPH10000 Intelligent Power Management temperature
+sensor.sph10000_internal_wattage
+SPH10000 Internal wattage
+4900.6
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Internal wattage
+sensor.sph10000_output_1_amperage
+SPH10000 Output 1 Amperage
+6.5
+unit_of_measurement: A
+device_class: current
+friendly_name: SPH10000 Output 1 Amperage
+sensor.sph10000_output_1_voltage
+SPH10000 Output 1 voltage
+414.3
+unit_of_measurement: V
+device_class: voltage
+friendly_name: SPH10000 Output 1 voltage
+sensor.sph10000_output_1_wattage
+SPH10000 Output 1 Wattage
+4823.6
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Output 1 Wattage
+sensor.sph10000_output_2_amperage
+SPH10000 Output 2 Amperage
+6.5
+unit_of_measurement: A
+device_class: current
+friendly_name: SPH10000 Output 2 Amperage
+sensor.sph10000_output_2_voltage
+SPH10000 Output 2 voltage
+414.2
+unit_of_measurement: V
+device_class: voltage
+friendly_name: SPH10000 Output 2 voltage
+sensor.sph10000_output_2_wattage
+SPH10000 Output 2 Wattage
+0.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Output 2 Wattage
+sensor.sph10000_output_3_amperage
+SPH10000 Output 3 Amperage
+6.6
+unit_of_measurement: A
+device_class: current
+friendly_name: SPH10000 Output 3 Amperage
+sensor.sph10000_output_3_voltage
+SPH10000 Output 3 voltage
+416.5
+unit_of_measurement: V
+device_class: voltage
+friendly_name: SPH10000 Output 3 voltage
+sensor.sph10000_output_3_wattage
+SPH10000 Output 3 Wattage
+0.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Output 3 Wattage
+sensor.sph10000_output_power
+SPH10000 Output power
+4785.7
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Output power
+sensor.sph10000_reactive_wattage
+SPH10000 Reactive wattage
+0.0
+state_class: measurement
+unit_of_measurement: W
+device_class: power
+friendly_name: SPH10000 Reactive wattage
+sensor.sph10000_real_power_output_percentage
+SPH10000 Real power output percentage
+0
+unit_of_measurement: %
+device_class: power_factor
+friendly_name: SPH10000 Real power output percentage
+sensor.sph10000_running_hours
+SPH10000 Running hours
+10396.411
+state_class: total_increasing
+unit_of_measurement: h
+device_class: duration
+friendly_name: SPH10000 Running hours
+sensor.sph10000_soc
+SPH10000 SOC
+100
+unit_of_measurement: %
+device_class: battery
+friendly_name: SPH10000 SOC
+sensor.sph10000_status
+SPH10000 Status
+PV_charge
+device_class: growatt_local__status
+friendly_name: SPH10000 Status
+sensor.sph10000_temperature
+SPH10000 Temperature
+42.7
+unit_of_measurement: °C
+device_class: temperature
+friendly_name: SPH10000 Temperature
+sensor.sph10000_total_energy_input
+SPH10000 Total energy input
+13991.8
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Total energy input
+sensor.sph10000_total_energy_produced
+SPH10000 Total energy produced
+13289.4
+state_class: total_increasing
+unit_of_measurement: kWh
+device_class: energy
+friendly_name: SPH10000 Total energy produced
+switch.sph10000_ac_charge
+SPH10000 AC Charge
+off
+friendly_name: SPH10000 AC Charge

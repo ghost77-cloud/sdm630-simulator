@@ -68,6 +68,7 @@ development_status:
   4-2-staleness-detection: done
   4-3-hard-soc-floor-enforcement: done
   4-4-sensor-value-range-validation: done
+  4-5-grid-import-as-negative-surplus: done
   epic-4-retrospective: optional
 
   # Epic 5: Test Infrastructure — Unit Tests for Pure Logic Components
