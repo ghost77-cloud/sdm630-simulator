@@ -2,7 +2,7 @@
 SDM630 Modbus Protocol Simulator using pymodbus
 Implements all input and holding registers as per SDM630 documentation.
 """
-from pymodbus.server import StartSerialServer, StartTcpServer
+#from pymodbus.server import StartTcpServer
 from pymodbus.datastore import ModbusServerContext, ModbusSparseDataBlock, ModbusDeviceContext
 from pymodbus import ModbusDeviceIdentification
 import struct
@@ -40,8 +40,13 @@ class SDM630DataBlock(ModbusSparseDataBlock):
         self._poll_callback = cb
 
     def getValues(self, address, count=1):
-        """Override to fire poll callback after assembling Modbus response."""
+        """Override to fire poll callback and log every Modbus read request."""
         values = super().getValues(address, count)
+        _LOGGER.debug(
+            "Modbus READ  addr=0x%04X(%d) count=%d  → %s",
+            address, address, count,
+            [f"0x{v:04X}" for v in (values or [])],
+        )
         if self._poll_callback is not None:
             try:
                 self._poll_callback()
@@ -58,22 +63,19 @@ class SDM630DataBlock(ModbusSparseDataBlock):
 
     def setValues(self, address, value):
         """Override the setValues method from ModbusSparseDataBlock to handle writes from Modbus clients"""
+        _LOGGER.debug("Modbus WRITE addr=0x%04X(%d) value=%r", address, address, value)
         # First call the parent class setValues to update the internal storage
         super().setValues(address, value)
-        
-        # Check if this is the first or second register of a float pair
-        if address % 2 == 1:  # Odd address - potential start of float
-            # Try to get both registers to form the float
-            # Use super().getValues() to avoid triggering the poll callback
+
+        # All float pairs start at even addresses (0-based PDU addressing).
+        if address % 2 == 0:
             reg1 = super().getValues(address, 1)[0]
             reg2 = super().getValues(address + 1, 1)[0]
-            # Convert the two registers back to float
             try:
                 float_value = struct.unpack('>f', struct.pack('>HH', reg1, reg2))[0]
-                # Update our register object with the new float value
                 self.registers.set_float(address, float_value)
             except (struct.error, IndexError):
-                pass  # Handle case where second register isn't available yet
+                pass
 
     def set_float(self, address, value):
         """Set a float value from our code (not from Modbus client)"""
@@ -116,12 +118,12 @@ identity.ProductName = 'SDM630 Modbus Simulator'
 identity.ModelName = 'SDM630'
 identity.MajorMinorRevision = '1.0'
 
-if __name__ == "__main__":
-    _LOGGER.info("Starting SDM630 Modbus TCP Simulator...")
+#if __name__ == "__main__":
+#    _LOGGER.info("Starting SDM630 Modbus TCP Simulator...")
     #StartTcpServer(context, identity=identity, framer="rtu", address=("0.0.0.0", 5020))
-    StartTcpServer(
-        context,
-        identity=identity,
-        address=("0.0.0.0", 5020),
-        framer="rtu"
-    )
+#    StartTcpServer(
+#        context,
+#        identity=identity,
+#        address=("0.0.0.0", 5020),
+#        framer="rtu"
+#    )
