@@ -32,17 +32,17 @@ class SDM630HoldingRegisters(SDM630Registers):
             register.set_value_change_callback(self.write_callback)
 
     def _init_registers(self):
-        # All holding registers from SDM630 MODBUS Protocol
-        self.registers.append(SDM630Register(3, 2, "Demand Period", "Minutes", 60.0))
-        self.registers.append(SDM630Register(11, 6, "System Type", "Type", 3))
-        self.registers.append(SDM630Register(13, 7, "Pulse1 Width", "Milliseconds", 5.0))
-        self.registers.append(SDM630Register(15, 8, "Password Lock", "Boolean", 0.0))
-        self.registers.append(SDM630Register(19, 10, "Network Parity Stop", "Float", 1.0)) # One stop bit and even parity
-        self.registers.append(SDM630Register(21, 11, "Network Node", "Float", 1.0))
-        self.registers.append(SDM630Register(23, 12, "Pulse1 Divisor1", "Float", 3.0))
-        self.registers.append(SDM630Register(25, 13, "Password", "Float", 0000))
-        self.registers.append(SDM630Register(29, 15, "Network Baud Rate", "Mode", 2.0))
-        self.registers.append(SDM630Register(87, 44, "Pulse 1 Energy Type", "Source", 4.0))
+        # All holding registers from SDM630 MODBUS Protocol (0-based PDU addresses)
+        self.registers.append(SDM630Register(2,  2, "Demand Period", "Minutes", 60.0))          # 0x0002
+        self.registers.append(SDM630Register(10, 6, "System Type", "Type", 3))                  # 0x000A
+        self.registers.append(SDM630Register(12, 7, "Pulse1 Width", "Milliseconds", 5.0))       # 0x000C
+        self.registers.append(SDM630Register(14, 8, "Password Lock", "Boolean", 0.0))           # 0x000E
+        self.registers.append(SDM630Register(18, 10, "Network Parity Stop", "Float", 1.0))      # 0x0012 One stop bit and even parity
+        self.registers.append(SDM630Register(20, 11, "Network Node", "Float", 1.0))             # 0x0014
+        self.registers.append(SDM630Register(22, 12, "Pulse1 Divisor1", "Float", 3.0))          # 0x0016
+        self.registers.append(SDM630Register(24, 13, "Password", "Float", 0000))                # 0x0018
+        self.registers.append(SDM630Register(28, 15, "Network Baud Rate", "Mode", 2.0))         # 0x001C
+        self.registers.append(SDM630Register(86, 44, "Pulse 1 Energy Type", "Source", 4.0))     # 0x0056
         super().__init__(self.registers)
         
         # Set the callback for all registers if it exists

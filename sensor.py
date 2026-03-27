@@ -24,7 +24,15 @@ from .modbus_server import (
     input_data_block,
 )
 from .sdm630_input_registers import TOTAL_POWER
-from . import CONF_ENTITIES, DEFAULTS, DOMAIN
+from . import sdm630_input_registers as _input_regs
+from . import CONF_ENTITIES, CONF_REGISTER_MAPPINGS, DEFAULTS, DOMAIN
+
+# Maps register constant names (e.g. "PHASE_1_VOLTAGE") to their PDU addresses.
+# Built dynamically from all uppercase int attributes in sdm630_input_registers.
+REGISTER_NAME_TO_ADDRESS: dict[str, int] = {
+    k: v for k, v in vars(_input_regs).items()
+    if k == k.upper() and isinstance(v, int)
+}
 from .surplus_engine import (
     SurplusEngine,
     SensorSnapshot,
@@ -263,6 +271,7 @@ class SDM630SimSensor(SensorEntity):
         self._invalidation_reasons: dict[str, str] = {}
         self._raw_surplus_sensor: SDM630RawSurplusSensor | None = None
         self._reported_surplus_sensor: SDM630ReportedSurplusSensor | None = None
+        self._entity_to_register: dict[str, int] = {}
 
     def set_surplus_sensors(
         self,
@@ -311,6 +320,36 @@ class SDM630SimSensor(SensorEntity):
             except (ValueError, TypeError):
                 pass
 
+        # Register mappings: subscribe entities and seed initial values.
+        register_mappings: dict = self._config.get(CONF_REGISTER_MAPPINGS, {})
+        for entity_id, reg_name in register_mappings.items():
+            address = REGISTER_NAME_TO_ADDRESS.get(reg_name)
+            if address is None:
+                _LOGGER.warning(
+                    "sdm630_simulator: unknown register name %r in register_mappings — skipped",
+                    reg_name,
+                )
+                continue
+            self._entity_to_register[entity_id] = address
+
+        if self._entity_to_register:
+            self.async_on_remove(
+                async_track_state_change_event(
+                    self.hass,
+                    list(self._entity_to_register.keys()),
+                    self._handle_register_mapping_change,
+                )
+            )
+            # Seed with current HA state so registers are populated at startup.
+            for entity_id, address in self._entity_to_register.items():
+                state = self.hass.states.get(entity_id)
+                if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    continue
+                try:
+                    input_data_block.set_float(address, float(state.state))
+                except (ValueError, TypeError):
+                    pass
+
         interval = timedelta(seconds=self._config.get("evaluation_interval", 15))
         self.async_on_remove(
             async_track_time_interval(self.hass, self._evaluation_tick, interval)
@@ -343,6 +382,23 @@ class SDM630SimSensor(SensorEntity):
             _LOGGER.debug(
                 "Cache invalidated for %s: non-numeric value '%s'",
                 entity_id, new_state.state,
+            )
+
+    @callback
+    def _handle_register_mapping_change(self, event) -> None:
+        """Write a mapped entity's new value directly to its Modbus register."""
+        new_state = event.data.get("new_state")
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+        address = self._entity_to_register.get(new_state.entity_id)
+        if address is None:
+            return
+        try:
+            input_data_block.set_float(address, float(new_state.state))
+        except (ValueError, TypeError):
+            _LOGGER.debug(
+                "register_mappings: non-numeric value %r from %s — skipped",
+                new_state.state, new_state.entity_id,
             )
 
     def _refresh_cache_timestamps(self) -> None:
