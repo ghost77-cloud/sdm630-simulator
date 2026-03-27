@@ -67,8 +67,8 @@ class SDM630DataBlock(ModbusSparseDataBlock):
         # First call the parent class setValues to update the internal storage
         super().setValues(address, value)
 
-        # All float pairs start at even addresses (0-based PDU addressing).
-        if address % 2 == 0:
+        # All float pairs start at odd addresses (1-based PDU addressing).
+        if address % 2 == 1:
             reg1 = super().getValues(address, 1)[0]
             reg2 = super().getValues(address + 1, 1)[0]
             try:
