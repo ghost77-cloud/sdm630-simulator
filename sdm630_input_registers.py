@@ -11,49 +11,49 @@ else:
     # Running as a package (Home Assistant component), use relative imports
     from .registers import SDM630Register, SDM630Registers
 
-# Constants for input register addresses (parameter numbers 1-54)
-PHASE_1_VOLTAGE = 1
-PHASE_2_VOLTAGE = 3
-PHASE_3_VOLTAGE = 5
-PHASE_1_CURRENT = 7
-PHASE_2_CURRENT = 9
-PHASE_3_CURRENT = 11
-PHASE_1_POWER = 13
-PHASE_2_POWER = 15
-PHASE_3_POWER = 17
-PHASE_1_VA = 19
-PHASE_2_VA = 21
-PHASE_3_VA = 23
-PHASE_1_VAR = 25
-PHASE_2_VAR = 27
-PHASE_3_VAR = 29
-PHASE_1_PF = 31
-PHASE_2_PF = 33
-PHASE_3_PF = 35
-PHASE_1_ANGLE = 37
-PHASE_2_ANGLE = 39
-PHASE_3_ANGLE = 41
-AVG_LN_VOLTAGE = 43
-AVG_LINE_CURRENT = 47
-SUM_LINE_CURRENT = 49
-TOTAL_POWER = 53
-TOTAL_VA = 57
-TOTAL_VAR = 61
-TOTAL_PF = 63
-TOTAL_ANGLE = 67
-FREQUENCY = 71
-TOTAL_IMPORT_KWH = 73
-TOTAL_EXPORT_KWH = 75
-TOTAL_IMPORT_KVARH = 77
-TOTAL_EXPORT_KVARH = 79
-TOTAL_VAH = 81
-TOTAL_AH = 83
-TOTAL_POWER_DEMAND = 85
-MAX_TOTAL_POWER_DEMAND = 87
-TOTAL_VA_DEMAND = 101
-MAX_TOTAL_VA_DEMAND = 103
-NEUTRAL_CURRENT_DEMAND = 105
-MAX_NEUTRAL_CURRENT_DEMAND = 107
+# Constants for input register addresses (0-based PDU addresses from SDM630 spec)
+PHASE_1_VOLTAGE = 0      # 0x0000
+PHASE_2_VOLTAGE = 2      # 0x0002
+PHASE_3_VOLTAGE = 4      # 0x0004
+PHASE_1_CURRENT = 6      # 0x0006
+PHASE_2_CURRENT = 8      # 0x0008
+PHASE_3_CURRENT = 10     # 0x000A
+PHASE_1_POWER = 12       # 0x000C
+PHASE_2_POWER = 14       # 0x000E
+PHASE_3_POWER = 16       # 0x0010
+PHASE_1_VA = 18          # 0x0012
+PHASE_2_VA = 20          # 0x0014
+PHASE_3_VA = 22          # 0x0016
+PHASE_1_VAR = 24         # 0x0018
+PHASE_2_VAR = 26         # 0x001A
+PHASE_3_VAR = 28         # 0x001C
+PHASE_1_PF = 30          # 0x001E
+PHASE_2_PF = 32          # 0x0020
+PHASE_3_PF = 34          # 0x0022
+PHASE_1_ANGLE = 36       # 0x0024
+PHASE_2_ANGLE = 38       # 0x0026
+PHASE_3_ANGLE = 40       # 0x0028
+AVG_LN_VOLTAGE = 42      # 0x002A
+AVG_LINE_CURRENT = 46    # 0x002E
+SUM_LINE_CURRENT = 48    # 0x0030
+TOTAL_POWER = 52         # 0x0034
+TOTAL_VA = 56            # 0x0038
+TOTAL_VAR = 60           # 0x003C
+TOTAL_PF = 62            # 0x003E
+TOTAL_ANGLE = 66         # 0x0042
+FREQUENCY = 70           # 0x0046
+TOTAL_IMPORT_KWH = 72    # 0x0048
+TOTAL_EXPORT_KWH = 74    # 0x004A
+TOTAL_IMPORT_KVARH = 76  # 0x004C
+TOTAL_EXPORT_KVARH = 78  # 0x004E
+TOTAL_VAH = 80           # 0x0050
+TOTAL_AH = 82            # 0x0052
+TOTAL_POWER_DEMAND = 84  # 0x0054
+MAX_TOTAL_POWER_DEMAND = 86  # 0x0056
+TOTAL_VA_DEMAND = 100        # 0x0064
+MAX_TOTAL_VA_DEMAND = 102    # 0x0066
+NEUTRAL_CURRENT_DEMAND = 104 # 0x0068
+MAX_NEUTRAL_CURRENT_DEMAND = 106  # 0x006A
 
 @dataclass
 class SDM630InputRegisters(SDM630Registers):
@@ -105,52 +105,52 @@ class SDM630InputRegisters(SDM630Registers):
         self.registers.append(SDM630Register(TOTAL_POWER_DEMAND, 43, "Total system power demand", "W", 320.0))
         self.registers.append(SDM630Register(MAX_TOTAL_POWER_DEMAND, 44, "Maximum total system power demand", "VA", 350.0))
         self.registers.append(SDM630Register(TOTAL_VA_DEMAND, 51, "Total system VA demand", "VA", 340.0))
-        self.registers.append(SDM630Register(MAX_TOTAL_VA_DEMAND, 53, "Maximum total system VA demand", "VA", 360.0))
+        self.registers.append(SDM630Register(MAX_TOTAL_VA_DEMAND, 52, "Maximum total system VA demand", "VA", 360.0))
         self.registers.append(SDM630Register(NEUTRAL_CURRENT_DEMAND, 53, "Neutral current demand", "Amps", 1.0))
         self.registers.append(SDM630Register(MAX_NEUTRAL_CURRENT_DEMAND, 54, "Maximum neutral current demand", "Amps", 1.2))
-        self.registers.append(SDM630Register(201, 101, "Line 1 to Line 2 volts", "Volts", 400.0))
-        self.registers.append(SDM630Register(203, 102, "Line 2 to Line 3 volts", "Volts", 400.0))
-        self.registers.append(SDM630Register(205, 103, "Line 3 to Line 1 volts", "Volts", 400.0))
-        self.registers.append(SDM630Register(207, 104, "Average line to line volts", "Volts", 400.0))
-        self.registers.append(SDM630Register(225, 113, "Neutral current", "Amps", 0.2))
-        self.registers.append(SDM630Register(235, 118, "Phase 1 L/N volts THD", "%", 0.2))
-        self.registers.append(SDM630Register(237, 119, "Phase 2 L/N volts THD", "%", 0.3))
-        self.registers.append(SDM630Register(239, 120, "Phase 3 L/N volts THD", "%", 0.4))
-        self.registers.append(SDM630Register(241, 121, "Phase 1 Current THD", "%", 0.3))
-        self.registers.append(SDM630Register(243, 122, "Phase 2 Current THD", "%", 0.6))
-        self.registers.append(SDM630Register(245, 123, "Phase 3 Current THD", "%", 0.3))
-        self.registers.append(SDM630Register(249, 125, "Average line to neutral volts THD", "%", 0.2))
-        self.registers.append(SDM630Register(251, 126, "Average line current THD", "%", 0.4))
-        self.registers.append(SDM630Register(259, 130, "Phase 1 current demand", "Amps", 0.0))
-        self.registers.append(SDM630Register(261, 131, "Phase 2 current demand", "Amps", 3.0))
-        self.registers.append(SDM630Register(263, 132, "Phase 3 current demand", "Amps", 1.0))
-        self.registers.append(SDM630Register(265, 133, "Maximum phase 1 current demand", "Amps", 13.0))
-        self.registers.append(SDM630Register(267, 134, "Maximum phase 2 current demand", "Amps", 13.0))
-        self.registers.append(SDM630Register(269, 135, "Maximum phase 3 current demand", "Amps", 13.0))
-        self.registers.append(SDM630Register(335, 168, "Line 1 to line 2 volts THD", "%", 0.5))
-        self.registers.append(SDM630Register(337, 169, "Line 2 to line 3 volts THD", "%", 0.3))
-        self.registers.append(SDM630Register(339, 170, "Line 3 to line 1 volts THD", "%", 0.4))
-        self.registers.append(SDM630Register(341, 171, "Average line to line volts THD", "%", 0.3))
-        self.registers.append(SDM630Register(343, 172, "Total kwh(3)", "kWh", 1348.8))
-        self.registers.append(SDM630Register(345, 173, "Total kvarh(3)", "kvarh", 125.0))
-        self.registers.append(SDM630Register(347, 174, "L1 import kwh", "kWh", 420.0))
-        self.registers.append(SDM630Register(349, 175, "L2 import kwh", "kWh", 370.0))
-        self.registers.append(SDM630Register(351, 176, "L3 import kWh", "kWh", 580.0))
-        self.registers.append(SDM630Register(353, 177, "L1 export kWh", "kWh", 1500.0))
-        self.registers.append(SDM630Register(355, 178, "L2 export kwh", "kWh", 1400.0))
-        self.registers.append(SDM630Register(357, 179, "L3 export kWh", "kWh", 1300.0))
-        self.registers.append(SDM630Register(359, 180, "L1 total kwh(3)", "kWh", 420.0))
-        self.registers.append(SDM630Register(361, 181, "L2 total kWh(3)", "kWh", 370.0))
-        self.registers.append(SDM630Register(363, 182, "L3 total kwh(3)", "kWh", 580.0))
-        self.registers.append(SDM630Register(365, 183, "L1 import kvarh", "kvarh", 10.0))
-        self.registers.append(SDM630Register(367, 184, "L2 import kvarh", "kvarh", 13.0))
-        self.registers.append(SDM630Register(369, 185, "L3 import kvarh", "kvarh", 17.0))
-        self.registers.append(SDM630Register(371, 186, "L1 export kvarh", "kvarh", 12.0))
-        self.registers.append(SDM630Register(373, 187, "L2 export kvarh", "kvarh", 16.0))
-        self.registers.append(SDM630Register(375, 188, "L3 export kvarh", "kvarh", 19.0))
-        self.registers.append(SDM630Register(377, 189, "L1 total kvarh (3)", "kvarh", 25.0))
-        self.registers.append(SDM630Register(379, 190, "L2 total kvarh (3)", "kvarh", 27.0))
-        self.registers.append(SDM630Register(381, 191, "L3 total kvarh (3)", "kvarh", 30.0))
+        self.registers.append(SDM630Register(200, 101, "Line 1 to Line 2 volts", "Volts", 400.0))        # 0x00C8
+        self.registers.append(SDM630Register(202, 102, "Line 2 to Line 3 volts", "Volts", 400.0))        # 0x00CA
+        self.registers.append(SDM630Register(204, 103, "Line 3 to Line 1 volts", "Volts", 400.0))        # 0x00CC
+        self.registers.append(SDM630Register(206, 104, "Average line to line volts", "Volts", 400.0))     # 0x00CE
+        self.registers.append(SDM630Register(224, 113, "Neutral current", "Amps", 0.2))                  # 0x00E0
+        self.registers.append(SDM630Register(234, 118, "Phase 1 L/N volts THD", "%", 0.2))               # 0x00EA
+        self.registers.append(SDM630Register(236, 119, "Phase 2 L/N volts THD", "%", 0.3))               # 0x00EC
+        self.registers.append(SDM630Register(238, 120, "Phase 3 L/N volts THD", "%", 0.4))               # 0x00EE
+        self.registers.append(SDM630Register(240, 121, "Phase 1 Current THD", "%", 0.3))                 # 0x00F0
+        self.registers.append(SDM630Register(242, 122, "Phase 2 Current THD", "%", 0.6))                 # 0x00F2
+        self.registers.append(SDM630Register(244, 123, "Phase 3 Current THD", "%", 0.3))                 # 0x00F4
+        self.registers.append(SDM630Register(248, 125, "Average line to neutral volts THD", "%", 0.2))   # 0x00F8
+        self.registers.append(SDM630Register(250, 126, "Average line current THD", "%", 0.4))            # 0x00FA
+        self.registers.append(SDM630Register(258, 130, "Phase 1 current demand", "Amps", 0.0))           # 0x0102
+        self.registers.append(SDM630Register(260, 131, "Phase 2 current demand", "Amps", 3.0))           # 0x0104
+        self.registers.append(SDM630Register(262, 132, "Phase 3 current demand", "Amps", 1.0))           # 0x0106
+        self.registers.append(SDM630Register(264, 133, "Maximum phase 1 current demand", "Amps", 13.0))  # 0x0108
+        self.registers.append(SDM630Register(266, 134, "Maximum phase 2 current demand", "Amps", 13.0))  # 0x010A
+        self.registers.append(SDM630Register(268, 135, "Maximum phase 3 current demand", "Amps", 13.0))  # 0x010C
+        self.registers.append(SDM630Register(334, 168, "Line 1 to line 2 volts THD", "%", 0.5))          # 0x014E
+        self.registers.append(SDM630Register(336, 169, "Line 2 to line 3 volts THD", "%", 0.3))          # 0x0150
+        self.registers.append(SDM630Register(338, 170, "Line 3 to line 1 volts THD", "%", 0.4))          # 0x0152
+        self.registers.append(SDM630Register(340, 171, "Average line to line volts THD", "%", 0.3))      # 0x0154
+        self.registers.append(SDM630Register(342, 172, "Total kwh(3)", "kWh", 1348.8))                   # 0x0156
+        self.registers.append(SDM630Register(344, 173, "Total kvarh(3)", "kvarh", 125.0))                # 0x0158
+        self.registers.append(SDM630Register(346, 174, "L1 import kwh", "kWh", 420.0))                   # 0x015A
+        self.registers.append(SDM630Register(348, 175, "L2 import kwh", "kWh", 370.0))                   # 0x015C
+        self.registers.append(SDM630Register(350, 176, "L3 import kWh", "kWh", 580.0))                   # 0x015E
+        self.registers.append(SDM630Register(352, 177, "L1 export kWh", "kWh", 1500.0))                  # 0x0160
+        self.registers.append(SDM630Register(354, 178, "L2 export kwh", "kWh", 1400.0))                  # 0x0162
+        self.registers.append(SDM630Register(356, 179, "L3 export kWh", "kWh", 1300.0))                  # 0x0164
+        self.registers.append(SDM630Register(358, 180, "L1 total kwh(3)", "kWh", 420.0))                 # 0x0166
+        self.registers.append(SDM630Register(360, 181, "L2 total kWh(3)", "kWh", 370.0))                 # 0x0168
+        self.registers.append(SDM630Register(362, 182, "L3 total kwh(3)", "kWh", 580.0))                 # 0x016A
+        self.registers.append(SDM630Register(364, 183, "L1 import kvarh", "kvarh", 10.0))                # 0x016C
+        self.registers.append(SDM630Register(366, 184, "L2 import kvarh", "kvarh", 13.0))                # 0x016E
+        self.registers.append(SDM630Register(368, 185, "L3 import kvarh", "kvarh", 17.0))                # 0x0170
+        self.registers.append(SDM630Register(370, 186, "L1 export kvarh", "kvarh", 12.0))                # 0x0172
+        self.registers.append(SDM630Register(372, 187, "L2 export kvarh", "kvarh", 16.0))                # 0x0174
+        self.registers.append(SDM630Register(374, 188, "L3 export kvarh", "kvarh", 19.0))                # 0x0176
+        self.registers.append(SDM630Register(376, 189, "L1 total kvarh (3)", "kvarh", 25.0))             # 0x0178
+        self.registers.append(SDM630Register(378, 190, "L2 total kvarh (3)", "kvarh", 27.0))             # 0x017A
+        self.registers.append(SDM630Register(380, 191, "L3 total kvarh (3)", "kvarh", 30.0))             # 0x017C
         
         super().__init__(self.registers)
         

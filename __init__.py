@@ -56,6 +56,7 @@ CONF_SOLAR_REMAINING_THRESHOLD_KWH = "solar_remaining_threshold_kwh"
 CONF_MAX_INVERTER_OUTPUT_KW = "max_inverter_output_kw"
 CONF_SENSOR_RANGES        = "sensor_ranges"   # optional; keys: soc, power_w
 CONF_SUNSET_CUTOFF_MINUTES = "sunset_cutoff_minutes"
+CONF_REGISTER_MAPPINGS    = "register_mappings"   # optional; dict: entity_id → register constant name
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DEFAULTS: dict = {
@@ -148,6 +149,7 @@ COMPONENT_SCHEMA = vol.Schema(
         vol.Optional(CONF_SOLAR_REMAINING_THRESHOLD_KWH): vol.Coerce(float),
         vol.Optional(CONF_SUNSET_CUTOFF_MINUTES):  vol.All(int, vol.Range(min=0, max=240)),
         vol.Optional(CONF_SENSOR_RANGES):          SENSOR_RANGES_SCHEMA,
+        vol.Optional(CONF_REGISTER_MAPPINGS):        {cv.entity_id: str},
     },
     extra=vol.ALLOW_EXTRA,
 )
@@ -224,6 +226,9 @@ async def async_setup(hass, config):
             )
 
     cfg[CONF_ENTITIES] = entities_cfg
+
+    # -- Register mappings: optional dict entity_id → register constant name --
+    cfg[CONF_REGISTER_MAPPINGS] = raw_cfg.get(CONF_REGISTER_MAPPINGS, {})
 
     # -- Store validated config --
     hass.data[DOMAIN] = {"config": cfg}
