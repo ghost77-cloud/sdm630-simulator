@@ -18,6 +18,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 from pymodbus.server import StartAsyncSerialServer
 from pymodbus.framer import FramerType
+from serial.rs485 import RS485Settings
 from .modbus_server import (
     context,
     identity,
@@ -78,6 +79,12 @@ async def start_modbus_server():
             baudrate=9600,
             handle_local_echo=False,
             ignore_missing_slaves=True,
+            rs485_mode=RS485Settings(
+                rts_level_for_tx=True,
+                rts_level_for_rx=False,
+                delay_before_tx=0.0,
+                delay_before_rx=0.0,
+            ),
         )
     except Exception as e:
         _LOGGER.error("Failed to start Modbus server: %s", str(e))
