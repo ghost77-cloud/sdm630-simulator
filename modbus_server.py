@@ -107,7 +107,7 @@ device_context = ModbusDeviceContext(
     ir = input_data_block
 )
 
-context = ModbusServerContext(devices={1: device_context}, single=False)
+context = ModbusServerContext(devices={2: device_context}, single=False)
 
 # Device identification
 identity = ModbusDeviceIdentification()
