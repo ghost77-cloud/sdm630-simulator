@@ -77,6 +77,7 @@ async def start_modbus_server():
             parity="E",
             baudrate=9600,
             handle_local_echo=False,
+            ignore_missing_slaves=True,
         )
     except Exception as e:
         _LOGGER.error("Failed to start Modbus server: %s", str(e))
