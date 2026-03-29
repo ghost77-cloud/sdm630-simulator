@@ -16,10 +16,8 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.util import dt as dt_util
-import time as _time
 from pymodbus.server import StartAsyncSerialServer
 from pymodbus.framer import FramerType
-from pymodbus.transport import ModbusProtocol
 from .modbus_server import (
     context,
     identity,
@@ -64,65 +62,21 @@ ENTITY_ROLE_TO_CACHE_KEY = {
 
 WALLBOX_POLL_WARNING_THRESHOLD: int = 300  # seconds
 
-# ── RS485 Echo-Window: seconds to suppress RX after each TX on server ─────────
-# At 9600 baud 8E1 the longest SDM630 frame is ~8 bytes ≈ 9 ms.
-# USB round-trip on CH348L adds up to ~15 ms.  30 ms covers both safely.
-# The THOR Wallbox (Modbus master) will not send a new request within this
-# window — it waits for our response first.
-_ECHO_WINDOW_S: float = 0.030
-
-_orig_send = ModbusProtocol.send
-_orig_datagram_received = ModbusProtocol.datagram_received
-
-
-def _patched_send(self: ModbusProtocol, data: bytes, addr=None) -> None:
-    if self.is_server:
-        self._echo_deadline: float = _time.monotonic() + _ECHO_WINDOW_S  # type: ignore[attr-defined]
-    _orig_send(self, data, addr)
-
-
-def _patched_datagram_received(self: ModbusProtocol, data: bytes, addr) -> None:
-    if self.is_server and _time.monotonic() < getattr(self, "_echo_deadline", 0.0):
-        _LOGGER.debug("echo suppressed (%d bytes)", len(data))
-        return
-    _orig_datagram_received(self, data, addr)
-
-
-def _apply_modbus_echo_patch() -> None:
-    """Monkey-patch ModbusProtocol to suppress TX echo on RS485 server connections.
-
-    The Waveshare CH348L adapter loops TX bytes back to RX.  The pymodbus
-    ``handle_local_echo`` implementation uses ``startswith``-matching which
-    fails when the echo arrives in fragmented USB packets.
-
-    This patch uses a deadline-based approach: after every ``send()`` on a
-    server connection all inbound data is discarded for ``_ECHO_WINDOW_S``
-    seconds.  The ``is_server`` guard ensures Modbus client connections
-    (e.g. Growatt integration) are completely unaffected.
-
-    The patch is idempotent — calling it twice is harmless.
-    """
-    if ModbusProtocol.send is _patched_send:
-        return  # already patched
-    ModbusProtocol.send = _patched_send  # type: ignore[method-assign]
-    ModbusProtocol.datagram_received = _patched_datagram_received  # type: ignore[method-assign]
-    _LOGGER.info(
-        "ModbusProtocol echo-suppression patch applied (window=%.0f ms)",
-        _ECHO_WINDOW_S * 1000,
-    )
+# ── RS485 Serial Port ─────────────────────────────────────────────────────────
+# Waveshare Industrial USB-RS485 (FT232RNL + SP485EEN, automatic transceiving).
+# After plugging in, check the stable by-id path with:
+#   ls /dev/serial/by-id/
+# and replace the placeholder below with the actual symlink target.
+SDM630_PORT: str = "/dev/ttyUSB0"
 
 async def start_modbus_server() -> None:
-    """Start the Modbus RTU serial server.
-
-    Echo suppression is handled by the ModbusProtocol monkey-patch applied
-    in async_setup_platform (_apply_modbus_echo_patch).
-    """
+    """Start the Modbus RTU serial server."""
     try:
-        _LOGGER.info("Starting SDM630 Modbus Serial Simulator...")
+        _LOGGER.info("Starting SDM630 Modbus Serial Simulator on %s...", SDM630_PORT)
         await StartAsyncSerialServer(
             context=context,
             identity=identity,
-            port="/dev/ttyACM2",
+            port=SDM630_PORT,
             framer=FramerType.RTU,
             stopbits=1,
             bytesize=8,
@@ -174,10 +128,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Install pymodbus log filter once — allows enabling pymodbus DEBUG without
     # flooding logs with Growatt (unit=0x1) frame traffic.
     logging.getLogger("pymodbus.logging").addFilter(_SimulatorOnlyFilter())
-
-    # Patch ModbusProtocol to suppress TX echo on RS485 server connections.
-    # Must be called before start_modbus_server() creates any protocol instance.
-    _apply_modbus_echo_patch()
 
     name = component_cfg.get(CONF_NAME, DEFAULT_NAME)
     hass.loop.create_task(start_modbus_server())

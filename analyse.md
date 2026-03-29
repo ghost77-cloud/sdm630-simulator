@@ -110,8 +110,8 @@ fehl, und `sent_buffer` wird dann auf `b""` zurückgesetzt → Echo landet im Bu
 | PTY Echo-Filter Proxy (sent_buffer) | mittel | – | ❌ asyncio-Race, nicht deployed |
 | PTY Echo-Filter Proxy (reader-pause) | hoch | – | ❌ gescheitert, Ursache unklar |
 | Log-Filter `_SimulatorOnlyFilter` | gering | Analyse-Hilfe | ❌ Pattern unvollständig |
-| pymodbus lokal patchen | mittel | Sehr hoch (Direktlösung) | **Nächster Schritt** |
-| FTDI-basierter Adapter | €10–15 | Vollständig (hardware-seitig) | Hardware-Fallback |
+| ModbusProtocol Monkey-Patch | gering | Sehr hoch (Direktlösung) | ❌ gescheitert |
+| FTDI-basierter Adapter | €10–15 | Vollständig (hardware-seitig) | **→ Hardware-Lösung** |
 
 ## Lösungsplan mit Fallback
 
@@ -167,60 +167,52 @@ Muster passieren den Filter — für die Analyse nicht brauchbar genug.
 - [x] Phase 3 Proxy (sent_buffer) → asyncio-Race, nicht funktional
 - [x] Phase 3 Proxy (reader-pause) → Echo trotzdem in pymodbus sichtbar
 - [x] Logging-Filter → Pattern unvollständig, für Analyse ungeeignet
-- [ ] pymodbus lokal patchen → noch nicht versucht
+- [x] pymodbus Monkey-Patch (`_apply_modbus_echo_patch`) → gescheitert
 
-### Nächste Optionen
+**Monkey-Patch-Ansatz (gescheitert):**
 
-#### Option A — pymodbus lokal patchen (empfohlen)
-
-Der Workspace enthält bereits einen lokalen pymodbus-Fork unter
-`pymodbus/pymodbus/transport/transport.py`. Der Server-seitige Empfangspfad
-kann direkt angepasst werden, ohne externen Proxy.
-
-**Ansatz:** In `datagram_received` vor dem Frame-Parsing prüfen, ob
-kürzlich gesendet wurde, und einen `reset_input_buffer()` erzwingen:
+Deadline-basiertes Verwerfen in `datagram_received` via `ModbusProtocol`-Monkey-Patch
+mit `is_server`-Guard (Growatt-Client unberührt). Code in `sensor.py` implementiert
+und deployed. Echo-Spam bleibt trotzdem sichtbar — Ursache unbekannt.
 
 ```python
-# In ModbusProtocol.datagram_received():
-if self._is_server and self._last_sent_at:
-    elapsed = time.monotonic() - self._last_sent_at
-    if elapsed < ECHO_WINDOW_S:
-        self._transport.reset_input_buffer()   # Echo wegwerfen
-        return
+def _patched_send(self, data, addr=None):
+    if self.is_server:
+        self._echo_deadline = time.monotonic() + 0.030
+    _orig_send(self, data, addr)
+
+def _patched_datagram_received(self, data, addr):
+    if self.is_server and time.monotonic() < getattr(self, "_echo_deadline", 0.0):
+        return  # verwerfen
+    _orig_datagram_received(self, data, addr)
 ```
 
-Alternativ: `data_received` im Server-Transport überschreiben, um einen
-definierten Warte-Pause nach jedem Sendevorgang einzuhalten.
+**Hypothese warum es nicht funktioniert:** pymodbus auf HAOS nutzt möglicherweise
+nicht die Klasse aus dem importierten Modul-Objekt direkt, sondern instanziiert
+über einen internen Factory-Mechanismus, der den Patch umgeht. Oder `datagram_received`
+wird auf einem anderen Codepfad (z. B. über asyncio Protocol-Dispatch) aufgerufen, der
+vom Patch nicht erfasst wird.
 
-**Vorteil:** Kein externer Code, keine PTY-Komplexität, kein Race-Risiko.
-Der lokale Fork kann auch als PR an pymodbus upstream eingereicht werden,
-da das Problem generisch für alle RS485-Adaptern ohne HW-Echo-Unterdrückung gilt.
+### Fazit: Software-Lösung erschöpft
 
-#### Option B — Hardware-Fallback (sicher, aber Aufwand)
+Alle Software-seitigen Ansätze wurden versucht und sind gescheitert.
+Die Ursache liegt im Hardware-Design des CH348L-Chips, der TX-Bytes auf RX zurückspiegelt
+ohne steuerbare DE/RE-Pin-Kontrolle.
 
-FTDI FT232R oder FT232H basierter USB-RS485-Adapter (€10–15). Dieser steuert
-DE/RE via RTS **synchron auf Chip-Ebene** — kein Echo entsteht physisch.
+**Einzig verbleibende zuverlässige Lösung: Hardware-Austausch.**
 
-Empfehlungen:
+Ein USB-RS485-Adapter mit synchron chip-seitiger DE/RE-Steuerung (FTDI FT232R/H-basiert)
+verhindert das Echo physisch — kein Software-Workaround erforderlich.
 
-- Waveshare USB-to-RS485 (FT232-basiert, **nicht** CH348L-Variante prüfen)
-- FTDI USB-RS485-WE-1800-BT
+## Aktuelle Konfiguration (Phase 4, deployed, unzureichend)
 
-## Aktuelle Konfiguration (Phase 1, deployed, unzureichend)
-
-In `sensor.py` (`USE_ECHO_FILTER_PROXY = False`):
+In `sensor.py` — direkter Server-Start ohne Proxy, Monkey-Patch aktiv:
 
 ```python
 await StartAsyncSerialServer(
     ...
-    handle_local_echo=True,
+    handle_local_echo=False,
     ignore_missing_slaves=True,
-    rs485_mode=RS485Settings(
-        rts_level_for_tx=True,
-        rts_level_for_rx=False,
-        delay_before_tx=0.0,
-        delay_before_rx=0.015,   # ← Phase-1-Änderung
-    ),
 )
 ```
 
@@ -246,8 +238,8 @@ logger:
 - [x] Phase 3 PTY Proxy (sent_buffer) → asyncio-Race, nicht funktional
 - [x] Phase 3 PTY Proxy (reader-pause) → Echo trotzdem in pymodbus sichtbar
 - [x] Logging-Filter → Pattern unvollständig
-- [ ] THOR-Fehler durch 1024-Byte-Buffer-Overflow analysieren
-- [ ] pymodbus lokal patchen (Option A)
+- [x] ModbusProtocol Monkey-Patch → unzureichend
+- [ ] Hardware-Austausch (FTDI FT232R/H-basierter USB-RS485-Adapter)
 
 ## Bus-Topologie
 
