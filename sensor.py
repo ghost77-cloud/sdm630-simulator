@@ -16,11 +16,10 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.util import dt as dt_util
-import asyncio
+import time as _time
 from pymodbus.server import StartAsyncSerialServer
 from pymodbus.framer import FramerType
-from serial.rs485 import RS485Settings
-from .echo_filter_proxy import AsyncEchoFilterProxy
+from pymodbus.transport import ModbusProtocol
 from .modbus_server import (
     context,
     identity,
@@ -65,70 +64,73 @@ ENTITY_ROLE_TO_CACHE_KEY = {
 
 WALLBOX_POLL_WARNING_THRESHOLD: int = 300  # seconds
 
-# ── RS485 Echo-Filter toggle ──────────────────────────────────────────────────
-# Phase 1 (default=False): use handle_local_echo + delay_before_rx on real port.
-# Phase 3 (set to True):   use PTY proxy — eliminates echo before pymodbus sees it.
-#   Requires Linux / HA Green (HAOS).  Set to True after Phase-1 tests are done.
-USE_ECHO_FILTER_PROXY: bool = False
+# ── RS485 Echo-Window: seconds to suppress RX after each TX on server ─────────
+# At 9600 baud 8E1 the longest SDM630 frame is ~8 bytes ≈ 9 ms.
+# USB round-trip on CH348L adds up to ~15 ms.  30 ms covers both safely.
+# The THOR Wallbox (Modbus master) will not send a new request within this
+# window — it waits for our response first.
+_ECHO_WINDOW_S: float = 0.030
 
-_echo_proxy: AsyncEchoFilterProxy | None = None
+_orig_send = ModbusProtocol.send
+_orig_datagram_received = ModbusProtocol.datagram_received
 
+
+def _patched_send(self: ModbusProtocol, data: bytes, addr=None) -> None:
+    if self.is_server:
+        self._echo_deadline: float = _time.monotonic() + _ECHO_WINDOW_S  # type: ignore[attr-defined]
+    _orig_send(self, data, addr)
+
+
+def _patched_datagram_received(self: ModbusProtocol, data: bytes, addr) -> None:
+    if self.is_server and _time.monotonic() < getattr(self, "_echo_deadline", 0.0):
+        _LOGGER.debug("echo suppressed (%d bytes)", len(data))
+        return
+    _orig_datagram_received(self, data, addr)
+
+
+def _apply_modbus_echo_patch() -> None:
+    """Monkey-patch ModbusProtocol to suppress TX echo on RS485 server connections.
+
+    The Waveshare CH348L adapter loops TX bytes back to RX.  The pymodbus
+    ``handle_local_echo`` implementation uses ``startswith``-matching which
+    fails when the echo arrives in fragmented USB packets.
+
+    This patch uses a deadline-based approach: after every ``send()`` on a
+    server connection all inbound data is discarded for ``_ECHO_WINDOW_S``
+    seconds.  The ``is_server`` guard ensures Modbus client connections
+    (e.g. Growatt integration) are completely unaffected.
+
+    The patch is idempotent — calling it twice is harmless.
+    """
+    if ModbusProtocol.send is _patched_send:
+        return  # already patched
+    ModbusProtocol.send = _patched_send  # type: ignore[method-assign]
+    ModbusProtocol.datagram_received = _patched_datagram_received  # type: ignore[method-assign]
+    _LOGGER.info(
+        "ModbusProtocol echo-suppression patch applied (window=%.0f ms)",
+        _ECHO_WINDOW_S * 1000,
+    )
 
 async def start_modbus_server() -> None:
-    """Start the Modbus RTU server, optionally via the PTY echo-filter proxy."""
-    global _echo_proxy
+    """Start the Modbus RTU serial server.
+
+    Echo suppression is handled by the ModbusProtocol monkey-patch applied
+    in async_setup_platform (_apply_modbus_echo_patch).
+    """
     try:
         _LOGGER.info("Starting SDM630 Modbus Serial Simulator...")
-
-        if USE_ECHO_FILTER_PROXY:
-            # Phase 3: open real port ourselves, give pymodbus the PTY slave.
-            # No RS485Settings on the PTY — pyserial cannot apply RS485 ioctls
-            # to a pseudo-terminal and the CH348L handles DE/RE automatically.
-            loop = asyncio.get_event_loop()
-            _echo_proxy = AsyncEchoFilterProxy(
-                "/dev/ttyACM2",
-                baudrate=9600,
-                bytesize=8,
-                parity="E",
-                stopbits=1,
-            )
-            port = _echo_proxy.start(loop)
-            await StartAsyncSerialServer(
-                context=context,
-                identity=identity,
-                port=port,
-                framer=FramerType.RTU,
-                stopbits=1,
-                bytesize=8,
-                parity="E",
-                baudrate=9600,
-                handle_local_echo=False,  # proxy handles echo stripping
-                ignore_missing_slaves=True,
-            )
-        else:
-            # Phase 1: direct port with delay_before_rx + handle_local_echo.
-            await StartAsyncSerialServer(
-                context=context,
-                identity=identity,
-                port="/dev/ttyACM2",
-                framer=FramerType.RTU,
-                stopbits=1,
-                bytesize=8,
-                parity="E",
-                baudrate=9600,
-                handle_local_echo=True,
-                ignore_missing_slaves=True,
-                rs485_mode=RS485Settings(
-                    rts_level_for_tx=True,
-                    rts_level_for_rx=False,
-                    delay_before_tx=0.0,
-                    # Phase-1 quick-test: gate RX for 15 ms after TX so the
-                    # hardware echo has time to pass before pymodbus reads.
-                    # At 9600 baud a 15-byte frame takes ~17 ms, so 15 ms is
-                    # slightly aggressive; raise to 0.020 if THOR still sees noise.
-                    delay_before_rx=0.015,
-                ),
-            )
+        await StartAsyncSerialServer(
+            context=context,
+            identity=identity,
+            port="/dev/ttyACM2",
+            framer=FramerType.RTU,
+            stopbits=1,
+            bytesize=8,
+            parity="E",
+            baudrate=9600,
+            handle_local_echo=False,
+            ignore_missing_slaves=True,
+        )
     except Exception as e:
         _LOGGER.error("Failed to start Modbus server: %s", str(e))
 
@@ -172,6 +174,10 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     # Install pymodbus log filter once — allows enabling pymodbus DEBUG without
     # flooding logs with Growatt (unit=0x1) frame traffic.
     logging.getLogger("pymodbus.logging").addFilter(_SimulatorOnlyFilter())
+
+    # Patch ModbusProtocol to suppress TX echo on RS485 server connections.
+    # Must be called before start_modbus_server() creates any protocol instance.
+    _apply_modbus_echo_patch()
 
     name = component_cfg.get(CONF_NAME, DEFAULT_NAME)
     hass.loop.create_task(start_modbus_server())
