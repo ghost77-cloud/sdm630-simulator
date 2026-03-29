@@ -16,9 +16,11 @@ from homeassistant.helpers.event import (
     async_track_time_interval,
 )
 from homeassistant.util import dt as dt_util
+import asyncio
 from pymodbus.server import StartAsyncSerialServer
 from pymodbus.framer import FramerType
 from serial.rs485 import RS485Settings
+from .echo_filter_proxy import AsyncEchoFilterProxy
 from .modbus_server import (
     context,
     identity,
@@ -63,29 +65,70 @@ ENTITY_ROLE_TO_CACHE_KEY = {
 
 WALLBOX_POLL_WARNING_THRESHOLD: int = 300  # seconds
 
+# ── RS485 Echo-Filter toggle ──────────────────────────────────────────────────
+# Phase 1 (default=False): use handle_local_echo + delay_before_rx on real port.
+# Phase 3 (set to True):   use PTY proxy — eliminates echo before pymodbus sees it.
+#   Requires Linux / HA Green (HAOS).  Set to True after Phase-1 tests are done.
+USE_ECHO_FILTER_PROXY: bool = False
 
-async def start_modbus_server():
-    """Start the Modbus server asynchronously."""
+_echo_proxy: AsyncEchoFilterProxy | None = None
+
+
+async def start_modbus_server() -> None:
+    """Start the Modbus RTU server, optionally via the PTY echo-filter proxy."""
+    global _echo_proxy
     try:
         _LOGGER.info("Starting SDM630 Modbus Serial Simulator...")
-        await StartAsyncSerialServer(
-            context=context,
-            identity=identity,
-            port="/dev/ttyACM2",
-            framer=FramerType.RTU,
-            stopbits=1,
-            bytesize=8,
-            parity="E",
-            baudrate=9600,
-            handle_local_echo=False,
-            ignore_missing_slaves=True,
-            rs485_mode=RS485Settings(
-                rts_level_for_tx=True,
-                rts_level_for_rx=False,
-                delay_before_tx=0.0,
-                delay_before_rx=0.0,
-            ),
-        )
+
+        if USE_ECHO_FILTER_PROXY:
+            # Phase 3: open real port ourselves, give pymodbus the PTY slave.
+            # No RS485Settings on the PTY — pyserial cannot apply RS485 ioctls
+            # to a pseudo-terminal and the CH348L handles DE/RE automatically.
+            loop = asyncio.get_event_loop()
+            _echo_proxy = AsyncEchoFilterProxy(
+                "/dev/ttyACM2",
+                baudrate=9600,
+                bytesize=8,
+                parity="E",
+                stopbits=1,
+            )
+            port = _echo_proxy.start(loop)
+            await StartAsyncSerialServer(
+                context=context,
+                identity=identity,
+                port=port,
+                framer=FramerType.RTU,
+                stopbits=1,
+                bytesize=8,
+                parity="E",
+                baudrate=9600,
+                handle_local_echo=False,  # proxy handles echo stripping
+                ignore_missing_slaves=True,
+            )
+        else:
+            # Phase 1: direct port with delay_before_rx + handle_local_echo.
+            await StartAsyncSerialServer(
+                context=context,
+                identity=identity,
+                port="/dev/ttyACM2",
+                framer=FramerType.RTU,
+                stopbits=1,
+                bytesize=8,
+                parity="E",
+                baudrate=9600,
+                handle_local_echo=True,
+                ignore_missing_slaves=True,
+                rs485_mode=RS485Settings(
+                    rts_level_for_tx=True,
+                    rts_level_for_rx=False,
+                    delay_before_tx=0.0,
+                    # Phase-1 quick-test: gate RX for 15 ms after TX so the
+                    # hardware echo has time to pass before pymodbus reads.
+                    # At 9600 baud a 15-byte frame takes ~17 ms, so 15 ms is
+                    # slightly aggressive; raise to 0.020 if THOR still sees noise.
+                    delay_before_rx=0.015,
+                ),
+            )
     except Exception as e:
         _LOGGER.error("Failed to start Modbus server: %s", str(e))
 
