@@ -14,29 +14,47 @@ Architecture::
     [ /dev/ttyACM2 ] ←── RS485 bus  +  hardware TX echo
       │
     [ AsyncEchoFilterProxy ]
-      │  _on_serial_data : read → filter_echo → os.write(master_fd)
-      │  _on_pty_data    : os.read(master_fd) → serial.write + track
+      │  _on_serial_data : read → forward to pymodbus via master_fd
+      │  _on_pty_data    : read from master_fd → write to serial
+      │                    → DISABLE serial reader for ECHO_WINDOW_S
+      │                    → call_later: flush serial buffer + re-enable
       ↓
     [ /dev/pts/X ] (PTY slave)
       │
     pymodbus / StartAsyncSerialServer
 
-Timing at 9600 baud 8E1 (11 bits/byte ≈ 1.146 ms/byte):
+Echo suppression strategy
+-------------------------
+Pattern-matching against ``sent_buffer`` is inherently racy in asyncio:
+the echo can arrive on the physical port before ``_on_pty_data`` has had
+a chance to populate ``sent_buffer``.
 
-- FC04 response (2 floats = ~11 bytes) ≈ 12.6 ms transmission time
-- ECHO_WINDOW_S = 0.060 (60 ms) — comfortable USB-serial latency margin
+Instead we use the **reader-pause** approach — identical to what the
+pymodbus *client* does internally with ``reset_input_buffer()``:
 
-After our response frame has been transmitted the bus is idle until
-THOR sends the next request.  All bytes arriving within ECHO_WINDOW_S
-of our last write are treated as echo and discarded; bytes arriving
-after the window pass through unchanged.
+1. ``_on_pty_data`` writes bytes to the physical RS485 port.
+2. Immediately removes the asyncio reader on the serial fd
+   (so any echo bytes are ignored at the event-loop level).
+3. Schedules ``_reenable_serial_reader`` via ``loop.call_later``
+   after ``ECHO_WINDOW_S``.
+4. ``_reenable_serial_reader`` flushes stale bytes from the OS serial
+   input buffer (``reset_input_buffer``), then re-registers the reader.
+
+This guarantees that echo bytes arriving within the window are never
+delivered to pymodbus — without any byte-pattern matching.
+
+Timing at 9600 baud 8E1 (≈ 1.146 ms/byte):
+- 5-byte frame           ≈  5.7 ms transmission
+- 8-byte FC16 response   ≈  9.2 ms
+- USB echo round-trip    ≈  1–15 ms
+- ECHO_WINDOW_S = 0.025  →  25 ms — catches echo, well below Modbus
+  inter-frame silence (3.5 chars ≈ 4 ms + THOR processing ≥ 50 ms).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import time
 
 import serial
 
@@ -51,14 +69,17 @@ class AsyncEchoFilterProxy:
         proxy = AsyncEchoFilterProxy(
             "/dev/ttyACM2", baudrate=9600, bytesize=8, parity="E", stopbits=1
         )
-        slave_path = proxy.start(asyncio.get_event_loop())
+        slave_path = proxy.start(asyncio.get_running_loop())
         # Pass slave_path to StartAsyncSerialServer instead of "/dev/ttyACM2"
         # ...
         proxy.stop()
     """
 
-    #: Seconds after last TX during which received bytes are treated as echo.
-    ECHO_WINDOW_S: float = 0.060
+    #: Seconds after TX during which the serial reader is paused.
+    #: Echo round-trip at 9600 baud over USB-serial ≈ 5–15 ms.
+    #: 25 ms provides margin without blocking legitimate THOR requests
+    #: (Modbus inter-frame gap + THOR processing ≥ ~50 ms).
+    ECHO_WINDOW_S: float = 0.025
 
     def __init__(
         self,
@@ -78,10 +99,9 @@ class AsyncEchoFilterProxy:
         self._master_fd: int = -1
         self._slave_path: str = ""
 
-        self._sent_buffer = bytearray()
-        self._sent_time: float = 0.0
-
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._serial_reader_active: bool = False
+        self._pending_reenable: asyncio.TimerHandle | None = None
 
     # ── Public API ─────────────────────────────────────────────────────────
 
@@ -94,11 +114,11 @@ class AsyncEchoFilterProxy:
         Raises ``ImportError`` on non-Linux platforms (``pty`` unavailable).
         """
         import pty  # Linux stdlib — deferred so module is importable on Windows
+        import tty  # Linux stdlib
 
         self._loop = loop
 
-        # Open real serial port non-blocking.  No RS485Settings here — the
-        # CH348L handles DE/RE automatically; we only need raw byte access.
+        # Open real serial port non-blocking.
         self._ser = serial.Serial(
             self._real_port,
             baudrate=self._baudrate,
@@ -108,16 +128,19 @@ class AsyncEchoFilterProxy:
             timeout=0,  # Non-blocking read
         )
 
-        # Create PTY pair.  Keep master_fd; close slave_fd immediately —
-        # the PTY stays alive as long as master_fd is open, and pyserial
-        # will reopen the slave via its filesystem path.
+        # Create PTY pair. Configure slave as raw (no terminal echo) before
+        # closing it, so the setting persists when pyserial reopens it.
         master_fd, slave_fd = pty.openpty()
+        tty.setraw(slave_fd)  # disable kernel terminal echo on the slave
         self._master_fd = master_fd
         self._slave_path = os.ttyname(slave_fd)
         os.close(slave_fd)
 
-        # Register asyncio edge-triggered readers on the HA event loop
+        # Register asyncio reader for physical serial port.
         loop.add_reader(self._ser.fileno(), self._on_serial_data)
+        self._serial_reader_active = True
+
+        # Register asyncio reader for PTY master (pymodbus writes via slave).
         loop.add_reader(self._master_fd, self._on_pty_data)
 
         _LOGGER.info(
@@ -130,17 +153,21 @@ class AsyncEchoFilterProxy:
 
     def stop(self) -> None:
         """Remove asyncio readers and release file descriptors."""
+        if self._pending_reenable is not None:
+            self._pending_reenable.cancel()
+            self._pending_reenable = None
+
         if self._loop:
-            for fd_getter in (
-                lambda: self._ser.fileno() if self._ser else -1,
-                lambda: self._master_fd,
-            ):
-                fd = fd_getter()
-                if fd >= 0:
-                    try:
-                        self._loop.remove_reader(fd)
-                    except Exception:
-                        pass
+            if self._ser and self._serial_reader_active:
+                try:
+                    self._loop.remove_reader(self._ser.fileno())
+                except Exception:
+                    pass
+            if self._master_fd >= 0:
+                try:
+                    self._loop.remove_reader(self._master_fd)
+                except Exception:
+                    pass
 
         if self._ser:
             try:
@@ -161,7 +188,7 @@ class AsyncEchoFilterProxy:
     # ── Asyncio callbacks ──────────────────────────────────────────────────
 
     def _on_serial_data(self) -> None:
-        """Data on real serial port → filter echo → forward to PTY master."""
+        """Physical serial port has data → forward to pymodbus via PTY master."""
         if self._ser is None:
             return
         try:
@@ -172,20 +199,20 @@ class AsyncEchoFilterProxy:
         if not data:
             return
 
-        filtered = self._filter_echo(data)
-        _LOGGER.debug(
-            "EchoFilterProxy serial→pty  raw=%d  filtered=%d bytes",
-            len(data),
-            len(filtered),
-        )
-        if filtered:
-            try:
-                os.write(self._master_fd, filtered)
-            except OSError as exc:
-                _LOGGER.error("EchoFilterProxy PTY write: %s", exc)
+        _LOGGER.debug("EchoFilterProxy serial→pty  %d bytes", len(data))
+        try:
+            os.write(self._master_fd, data)
+        except OSError as exc:
+            _LOGGER.error("EchoFilterProxy PTY write: %s", exc)
 
     def _on_pty_data(self) -> None:
-        """pymodbus wrote to PTY slave → read from master, track + send to serial."""
+        """pymodbus wrote response to PTY slave → forward to physical serial.
+
+        After writing, the serial reader is paused for ``ECHO_WINDOW_S`` so
+        that the hardware TX echo is silently discarded at OS level.
+        """
+        if self._ser is None:
+            return
         try:
             data = os.read(self._master_fd, 256)
         except OSError as exc:
@@ -194,53 +221,63 @@ class AsyncEchoFilterProxy:
         if not data:
             return
 
-        # Record outgoing bytes for echo matching
-        self._sent_buffer.extend(data)
-        self._sent_time = time.monotonic()
-
         _LOGGER.debug(
-            "EchoFilterProxy pty→serial  %d bytes  (sent_buffer=%d bytes)",
+            "EchoFilterProxy pty→serial  %d bytes  (pausing reader for %d ms)",
             len(data),
-            len(self._sent_buffer),
+            int(self.ECHO_WINDOW_S * 1000),
         )
-        if self._ser is None:
-            return
+
+        # Write to physical serial port.
         try:
             self._ser.write(data)
         except Exception as exc:
             _LOGGER.error("EchoFilterProxy serial write: %s", exc)
+            return
 
-    # ── Echo filtering ─────────────────────────────────────────────────────
+        # ── Pause serial reader for echo window ───────────────────────────
+        # Remove the serial fd reader so that any echo bytes arriving during
+        # ECHO_WINDOW_S are never delivered to _on_serial_data / pymodbus.
+        assert self._loop is not None
+        if self._serial_reader_active:
+            try:
+                self._loop.remove_reader(self._ser.fileno())
+                self._serial_reader_active = False
+            except Exception:
+                pass
 
-    def _filter_echo(self, data: bytes) -> bytes:
-        """Remove TX echo bytes from *data*.
+        # Cancel any previous pending re-enable (can happen if multiple
+        # responses arrive before the window expires).
+        if self._pending_reenable is not None:
+            self._pending_reenable.cancel()
 
-        Matches received bytes in order against ``_sent_buffer``.  A byte is
-        treated as echo (and discarded) when it matches the next expected echo
-        byte AND the last TX was within ``ECHO_WINDOW_S`` seconds.
+        self._pending_reenable = self._loop.call_later(
+            self.ECHO_WINDOW_S, self._reenable_serial_reader
+        )
 
-        Handles fragmented echo delivery: partial matches consume the
-        front of ``_sent_buffer`` and accumulate across multiple calls.
+    def _reenable_serial_reader(self) -> None:
+        """Called after echo window expires — flush echo bytes and resume reading."""
+        self._pending_reenable = None
+        if self._ser is None or self._loop is None:
+            return
 
-        On half-duplex RS485 the bus is idle between our response and the
-        next request from THOR, so any byte arriving within the window is
-        guaranteed to be echo — no legitimate data is discarded.
-        """
-        elapsed = time.monotonic() - self._sent_time
+        # Flush any echo bytes that accumulated in the OS serial input buffer
+        # during the pause window.  This mirrors what pymodbus client does
+        # internally with reset_input_buffer() before reading a response.
+        try:
+            waiting = self._ser.in_waiting
+            if waiting:
+                discarded = self._ser.read(waiting)
+                _LOGGER.debug(
+                    "EchoFilterProxy flushed %d echo byte(s) after window", len(discarded)
+                )
+        except Exception as exc:
+            _LOGGER.warning("EchoFilterProxy flush error: %s", exc)
 
-        # Outside echo window — clear stale buffer, pass data through
-        if elapsed > self.ECHO_WINDOW_S or not self._sent_buffer:
-            self._sent_buffer.clear()
-            return data
+        # Re-register the serial reader for normal operation.
+        if not self._serial_reader_active:
+            try:
+                self._loop.add_reader(self._ser.fileno(), self._on_serial_data)
+                self._serial_reader_active = True
+            except Exception as exc:
+                _LOGGER.error("EchoFilterProxy failed to re-add serial reader: %s", exc)
 
-        result = bytearray()
-        i = 0  # number of sent_buffer bytes matched so far
-
-        for byte in data:
-            if i < len(self._sent_buffer) and byte == self._sent_buffer[i]:
-                i += 1  # Echo byte matched → discard
-            else:
-                result.append(byte)  # Not echo → keep
-
-        del self._sent_buffer[:i]  # Consume matched prefix
-        return bytes(result)

@@ -133,12 +133,45 @@ async def start_modbus_server() -> None:
         _LOGGER.error("Failed to start Modbus server: %s", str(e))
 
 
+class _SimulatorOnlyFilter(logging.Filter):
+    """Suppress pymodbus DEBUG/INFO messages that belong to the Growatt (unit=0x1) connection.
+
+    When pymodbus.logging is set to DEBUG both Growatt and SDM630 frame traffic
+    appears.  This filter passes all WARNING+ records unchanged and drops
+    frame-level DEBUG/INFO records that contain the Growatt unit-address byte
+    (0x1) so that only SDM630 simulator traffic (unit 0x2) remains visible.
+
+    Install once at startup::
+
+        logging.getLogger("pymodbus.logging").addFilter(_SimulatorOnlyFilter())
+
+    Then enable live via HA Developer Tools → Services::
+
+        logger.set_level  {"pymodbus.logging": "debug"}
+    """
+
+    _GROWATT_PREFIXES = ("send: 0x1 ", "recv: 0x1 ", "Processing: 0x1 ")
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: A003
+        if record.levelno >= logging.WARNING:
+            return True
+        msg = record.getMessage()
+        for prefix in self._GROWATT_PREFIXES:
+            if prefix in msg:
+                return False
+        return True
+
+
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the SDM630 simulated sensor."""
     # The component config (with entities, thresholds etc.) is stored in
     # hass.data[DOMAIN] by __init__.py. The `config` argument here is the
     # platform config which is empty when loaded via async_load_platform.
     component_cfg = hass.data.get(DOMAIN, {}).get("config", config)
+
+    # Install pymodbus log filter once — allows enabling pymodbus DEBUG without
+    # flooding logs with Growatt (unit=0x1) frame traffic.
+    logging.getLogger("pymodbus.logging").addFilter(_SimulatorOnlyFilter())
 
     name = component_cfg.get(CONF_NAME, DEFAULT_NAME)
     hass.loop.create_task(start_modbus_server())
