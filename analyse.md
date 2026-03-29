@@ -105,78 +105,108 @@ fehl, und `sent_buffer` wird dann auf `b""` zurückgesetzt → Echo landet im Bu
 
 | Option | Aufwand | Wirkung | Status |
 |--------|---------|---------|--------|
-| `handle_local_echo=True` | 0 | Partiell (nur bei Block-Echo) | War bereits aktiv |
-| `delay_before_rx=0.015` | minimal | Mittel (CH348L-abhängig) | **Phase 1 — deployed** |
-| PTY Echo-Filter Proxy | mittel | Sehr hoch (fragmentiert-robust) | **Phase 3 — implementiert** |
-| FTDI-basierter Adapter | €10–15 | Vollständig (hardware-seitig) | Fallback |
+| `handle_local_echo=True` | 0 | Partiell (nur bei Block-Echo) | ❌ unzureichend |
+| `delay_before_rx=0.015` | minimal | Mittel (CH348L-abhängig) | ❌ unzureichend |
+| PTY Echo-Filter Proxy (sent_buffer) | mittel | – | ❌ asyncio-Race, nicht deployed |
+| PTY Echo-Filter Proxy (reader-pause) | hoch | – | ❌ gescheitert, Ursache unklar |
+| Log-Filter `_SimulatorOnlyFilter` | gering | Analyse-Hilfe | ❌ Pattern unvollständig |
+| pymodbus lokal patchen | mittel | Sehr hoch (Direktlösung) | **Nächster Schritt** |
+| FTDI-basierter Adapter | €10–15 | Vollständig (hardware-seitig) | Hardware-Fallback |
 
 ## Lösungsplan mit Fallback
 
-### Phase 1 — Quick-Test (sofort, nur Deploy)
+### Phase 1 — Quick-Test (deployed, gescheitert)
 
-`delay_before_rx=0.015` in `RS485Settings`: pyserial/Kernel wartet 15 ms nach TX,
-bevor RX geöffnet wird. Bei 9600 Baud entspricht ein 15-Byte-Frame ~17 ms —
-das Fenster ist knapp, aber bei USB-Latenz des CH348L oft ausreichend.
+`delay_before_rx=0.015` in `RS485Settings` brachte keine ausreichende Verbesserung.
+Das Echo vom CH348L trifft noch innerhalb des RX-Fensters ein.
 
-**Testen:** HA neu starten, 10 Minuten Log beobachten.
-Falls "Frame check failed" deutlich abnimmt → weiter zu Phase 3.
-Falls THOR-Fehler durch zu langes RX-Gate entstehen → auf `0.020` erhöhen.
+### Phase 3 — PTY Echo-Filter Proxy (gescheitert)
 
-### Phase 3 — PTY Echo-Filter Proxy (parallel entwickelt)
+Zwei Varianten wurden entwickelt und getestet, beide scheiterten.
 
-Neues Modul [`echo_filter_proxy.py`](echo_filter_proxy.py), `AsyncEchoFilterProxy`:
-
-**Architektur:**
-
-```text
-THOR (bus master)
-  │
-[ /dev/ttyACM2 ] ←── RS485  +  Hardware-TX-Echo (CH348L)
-  │
-[ AsyncEchoFilterProxy ]  ← asyncio add_reader auf HA Event Loop
-  │  _on_serial_data: read → filter_echo → os.write(master_fd)
-  │  _on_pty_data:    os.read(master_fd) → serial.write + sent_buffer tracken
-  ↓
-[ /dev/pts/X ] (PTY Slave)  ← pymodbus "sieht" dies als normalen Serial-Port
-  │
-pymodbus / StartAsyncSerialServer
-```
-
-**Echo-Filter-Algorithmus** (fragmentierungs-robust, anders als pymodbus `startswith`):
+**Variante 1 — `sent_buffer` Pattern-Matching:**
 
 ```python
 for byte in data:
     if i < len(sent_buffer) and byte == sent_buffer[i]:
         i += 1  # Echo-Byte matched → verwerfen
     else:
-        result.append(byte)  # kein Echo → behalten
-del sent_buffer[:i]
+        result.append(byte)
 ```
 
-**Aktivierung:** In `sensor.py` das Toggle setzen:
+Fehler: asyncio-Race-Condition — Echo kann eintreffen, bevor `_on_pty_data`
+den `sent_buffer` befüllt hat. Ergebnis: Echo wurde nicht gefiltert.
+
+**Variante 2 — Reader-Pause (analog zum pymodbus-Client):**
 
 ```python
-USE_ECHO_FILTER_PROXY: bool = True   # False = Phase 1, True = Phase 3
+def _on_pty_data(self) -> None:
+    data = os.read(self._master_fd, 4096)
+    self._ser.write(data)
+    self._loop.remove_reader(self._ser.fileno())      # RX stumm schalten
+    self._loop.call_later(0.025, self._reenable_serial_reader)
+
+def _reenable_serial_reader(self) -> None:
+    self._ser.reset_input_buffer()                    # Echo verwerfen
+    self._loop.add_reader(self._ser.fileno(), self._on_serial_data)
 ```
 
-**HA Green / HAOS Kompatibilität:**
+Ergebnis aus HA-Log: Echo-Bytes `0x2 0x10 0x0 0x1e 0xc5` und
+`0x2 0x50 0x56 0x4 0x64` erscheinen weiterhin in pymodbus `extra data`.
+Mögliche Ursachen noch nicht diagnostiziert.
 
-- `pty` Modul: Python stdlib, auf Linux immer verfügbar ✓
-- PTY-Slave als pyserial-Port öffenbar (`/dev/pts/X`) ✓
-- Kein `socat`, kein externer Prozess nötig ✓
-- asyncio `add_reader` läuft im HA Event Loop — keine Threads ✓
-- `RS485Settings` entfällt für PTY (CH348L steuert DE/RE automatisch) ✓
+**Logging-Filter `_SimulatorOnlyFilter` (unzureichend):**
 
-### Fallback — FTDI-basierter RS485-Adapter (€10–15)
+Pattern-Matching auf `"send: 0x1 "` / `"recv: 0x1 "` deckt nicht alle
+pymodbus-Meldungen ab. Weitere Nachrichten des Growatt-Verkehrs ohne dieses
+Muster passieren den Filter — für die Analyse nicht brauchbar genug.
 
-Falls Phase 1 und Phase 3 nicht ausreichen: FTDI FT232R oder FT232H basierter
-USB-RS485-Adapter. Dieser steuert DE/RE via RTS **synchron auf Chip-Ebene** —
-kein Echo entsteht. Empfehlungen:
+### Offene Testergebnisse
+
+- [x] Phase 1 (`delay_before_rx=0.015`) → kein ausreichender Effekt
+- [x] Phase 3 Proxy (sent_buffer) → asyncio-Race, nicht funktional
+- [x] Phase 3 Proxy (reader-pause) → Echo trotzdem in pymodbus sichtbar
+- [x] Logging-Filter → Pattern unvollständig, für Analyse ungeeignet
+- [ ] pymodbus lokal patchen → noch nicht versucht
+
+### Nächste Optionen
+
+#### Option A — pymodbus lokal patchen (empfohlen)
+
+Der Workspace enthält bereits einen lokalen pymodbus-Fork unter
+`pymodbus/pymodbus/transport/transport.py`. Der Server-seitige Empfangspfad
+kann direkt angepasst werden, ohne externen Proxy.
+
+**Ansatz:** In `datagram_received` vor dem Frame-Parsing prüfen, ob
+kürzlich gesendet wurde, und einen `reset_input_buffer()` erzwingen:
+
+```python
+# In ModbusProtocol.datagram_received():
+if self._is_server and self._last_sent_at:
+    elapsed = time.monotonic() - self._last_sent_at
+    if elapsed < ECHO_WINDOW_S:
+        self._transport.reset_input_buffer()   # Echo wegwerfen
+        return
+```
+
+Alternativ: `data_received` im Server-Transport überschreiben, um einen
+definierten Warte-Pause nach jedem Sendevorgang einzuhalten.
+
+**Vorteil:** Kein externer Code, keine PTY-Komplexität, kein Race-Risiko.
+Der lokale Fork kann auch als PR an pymodbus upstream eingereicht werden,
+da das Problem generisch für alle RS485-Adaptern ohne HW-Echo-Unterdrückung gilt.
+
+#### Option B — Hardware-Fallback (sicher, aber Aufwand)
+
+FTDI FT232R oder FT232H basierter USB-RS485-Adapter (€10–15). Dieser steuert
+DE/RE via RTS **synchron auf Chip-Ebene** — kein Echo entsteht physisch.
+
+Empfehlungen:
 
 - Waveshare USB-to-RS485 (FT232-basiert, **nicht** CH348L-Variante prüfen)
 - FTDI USB-RS485-WE-1800-BT
 
-## Aktuelle Konfiguration (Phase 1, deployed)
+## Aktuelle Konfiguration (Phase 1, deployed, unzureichend)
 
 In `sensor.py` (`USE_ECHO_FILTER_PROXY = False`):
 
@@ -194,7 +224,13 @@ await StartAsyncSerialServer(
 )
 ```
 
-## Logging-Empfehlung (weiterhin sinnvoll)
+## Logging
+
+Der `_SimulatorOnlyFilter` in `sensor.py` ist installiert, aber unzureichend: pymodbus
+erzeugt beim DEBUG-Level Meldungen ohne das `"send: 0x1 "` / `"recv: 0x1 "`-Präfix
+(z. B. interne Decoder- und Framer-Meldungen), die den Filter passieren.
+
+Empfohlene Minimaleinstellung für normale Betrieb:
 
 ```yaml
 logger:
@@ -206,9 +242,12 @@ logger:
 
 ## Offene Fragen / Testergebnisse
 
-- [ ] Phase 1 testen: Nimmt "Frame check failed"-Frequenz mit `delay_before_rx=0.015` ab?
-- [ ] THOR-Fehler durch 1024-Byte-Buffer-Overflow? (Reset während FC04-Anfrage → Timeout)
-- [ ] Phase 3 testen: `USE_ECHO_FILTER_PROXY = True` → vollständige Echo-Eliminierung?
+- [x] Phase 1 (`delay_before_rx=0.015`) → unzureichend
+- [x] Phase 3 PTY Proxy (sent_buffer) → asyncio-Race, nicht funktional
+- [x] Phase 3 PTY Proxy (reader-pause) → Echo trotzdem in pymodbus sichtbar
+- [x] Logging-Filter → Pattern unvollständig
+- [ ] THOR-Fehler durch 1024-Byte-Buffer-Overflow analysieren
+- [ ] pymodbus lokal patchen (Option A)
 
 ## Bus-Topologie
 
